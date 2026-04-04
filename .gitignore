@@ -1,0 +1,5 @@
+.DS_Store
+nvim/.repro/
+**/undo/
+**/backups/
+**/swp/
