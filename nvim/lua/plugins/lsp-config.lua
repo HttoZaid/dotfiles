@@ -76,6 +76,10 @@ return {
             fzf.lsp_definitions({ jump1 = true, ignore_current_line = true })
           end, opts)
 
+          vim.keymap.set("n", "gi", function()
+            fzf.lsp_implementations({ jump1 = true })
+          end, opts)
+
           vim.keymap.set("n", "gr", function()
             fzf.lsp_references({ ignore_current_line = true })
           end, opts)
