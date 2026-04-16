@@ -14,6 +14,7 @@ return {
         ensure_installed = {
           "lua_ls",
           "ts_ls",
+          "tailwindcss",
           "pyright",
           "html",
           "cssls",
@@ -60,6 +61,7 @@ return {
       vim.lsp.enable({
         "lua_ls",
         "ts_ls",
+        "tailwindcss",
         "pyright",
         "html",
         "cssls",

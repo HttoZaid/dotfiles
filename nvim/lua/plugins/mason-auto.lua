@@ -17,6 +17,7 @@ return {
           -- LSPs
           "lua_ls",
           "ts_ls",
+          "tailwindcss-language-server",
           "pyright",
           "clangd",
           "html",
