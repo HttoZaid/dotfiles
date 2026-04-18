@@ -13,13 +13,10 @@ return {
     },
     document_color = {
       enabled = true,
-      kind = "inline",
-      inline_symbol = "󰝤 ",
+      kind = "background",
     },
     conceal = {
-      enabled = true,
-      symbol = "󱏿",
-      highlight = { fg = "#38BDF8" },
+      enabled = false,
     },
   }
 }
