@@ -23,6 +23,7 @@ return {
           "html",
           "cssls",
           "gopls",
+          "rust-analyzer",
 
           -- Formatters/Linters
           "stylua",

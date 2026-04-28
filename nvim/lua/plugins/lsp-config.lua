@@ -20,6 +20,7 @@ return {
           "cssls",
           "clangd",
           "gopls",
+          "rust_analyzer",
         },
         automatic_enable = false,
       })
@@ -67,6 +68,7 @@ return {
         "cssls",
         "clangd",
         "gopls",
+        "rust_analyzer",
       })
 
       vim.api.nvim_create_autocmd("LspAttach", {
