@@ -14,6 +14,19 @@ keymap.set("n", "<leader>q", ":q<CR>", { desc = "Quick quit" })
 -- Search & Highlighting
 keymap.set("n", "<leader>nh", ":nohl<CR>", { desc = "Clear search highlights" })
 
+-- Make 'n' and 'N' center the screen and trigger hlslens virtual text
+local hlslens_status, hlslens = pcall(require, 'hlslens')
+if hlslens_status then
+    local kopts = { noremap = true, silent = true }
+
+    keymap.set('n', 'n', [[<Cmd>execute('normal! ' . v:count1 . 'n')<CR><Cmd>lua require('hlslens').start()<CR>zz]],
+        kopts)
+    keymap.set('n', 'N', [[<Cmd>execute('normal! ' . v:count1 . 'N')<CR><Cmd>lua require('hlslens').start()<CR>zz]],
+        kopts)
+    keymap.set('n', '*', [[*<Cmd>lua require('hlslens').start()<CR>]], kopts)
+    keymap.set('n', '#', [[#<Cmd>lua require('hlslens').start()<CR>]], kopts)
+end
+
 -- =============================================================================
 --  NAVIGATION (Windows & Buffers)
 -- =============================================================================
@@ -31,16 +44,16 @@ keymap.set("n", "<leader>bp", "<cmd>BufferLinePick<cr>", { desc = "Buffer Pick (
 
 -- Smart Buffer Close (Closes buffer but keeps the window split)
 keymap.set("n", "<leader>x", function()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local listed_buffers = vim.fn.getbufinfo({ buflisted = 1 })
+    local bufnr = vim.api.nvim_get_current_buf()
+    local listed_buffers = vim.fn.getbufinfo({ buflisted = 1 })
 
-  if #listed_buffers <= 1 then
-    vim.cmd("enew")
-    vim.cmd("bd #")
-  else
-    vim.cmd("bp")
-    vim.cmd("bd " .. bufnr)
-  end
+    if #listed_buffers <= 1 then
+        vim.cmd("enew")
+        vim.cmd("bd #")
+    else
+        vim.cmd("bp")
+        vim.cmd("bd " .. bufnr)
+    end
 end, { desc = "Close current buffer" })
 
 -- =============================================================================
@@ -66,19 +79,36 @@ keymap.set("i", "<C-e>", "<ESC>A", { desc = "Move to end of line" })
 -- =============================================================================
 --  FUZZY FINDER (fzf-lua)
 -- =============================================================================
--- Note: We wrap these in functions so it doesn't crash if fzf-lua isn't loaded yet.
 
-local fzf = function(cmd)
-  return function()
-    require("fzf-lua")[cmd]()
-  end
+local fzf_wrapper = function(cmd, opts)
+    return function()
+        local defaults = {
+            jump_to_column = true,
+            winopts = {
+                preview = { layout = "vertical" },
+            },
+        }
+        local final_opts = vim.tbl_deep_extend("force", defaults, opts or {})
+        require("fzf-lua")[cmd](final_opts)
+    end
 end
 
-keymap.set("n", "<leader>ff", fzf("files"), { desc = "Fzf: Find files" })
-keymap.set("n", "<leader>fg", fzf("live_grep"), { desc = "Fzf: Live Grep (Ripgrep)" })
-keymap.set("n", "<leader>fb", fzf("buffers"), { desc = "Fzf: List buffers" })
-keymap.set("n", "<leader>fs", fzf("grep_cword"), { desc = "Fzf: Search word under cursor" })
-keymap.set("n", "<leader>fh", fzf("help_tags"), { desc = "Fzf: Help documentation" })
+-- --- Search & Discovery ---
+keymap.set("n", "<leader>ff", fzf_wrapper("files"), { desc = "Fzf: Find Project Files" })
+keymap.set("n", "<leader>fb", fzf_wrapper("buffers"), { desc = "Fzf: Open Buffers" })
+keymap.set("n", "<leader>fh", fzf_wrapper("help_tags"), { desc = "Fzf: Documentation Tags" })
+
+-- --- The Grep Engine (Project-Wide) ---
+-- Live Grep: Fuzzy search as you type
+keymap.set("n", "<leader>fg", fzf_wrapper("live_grep"), { desc = "Fzf: Live Grep (Global)" })
+-- Grep Word: Find the exact string under your cursor across the project
+keymap.set("n", "<leader>fs", fzf_wrapper("grep_cword"), { desc = "Fzf: Search Word under Cursor" })
+-- Project Search: Manual entry for an exact string search
+keymap.set("n", "<leader>sp", fzf_wrapper("grep"), { desc = "Fzf: Manual Project Search" })
+
+-- --- The "Modern /" (In-File Search) ---
+-- Persistent Search: Like '/' but the list stays open while you browse
+keymap.set("n", "<leader>f/", fzf_wrapper("grep_curbuf"), { desc = "Fzf: Search in Current Buffer" })
 
 -- =============================================================================
 --  FILE EXPLORERS (NvimTree & Oil)
@@ -106,11 +136,11 @@ keymap.set("n", "<leader>nh", "<cmd>Noice history<cr>", { desc = "Noice: History
 keymap.set("n", "<leader>nd", "<cmd>Noice dismiss<cr>", { desc = "Noice: Dismiss all" })
 
 keymap.set({ "n", "i", "s" }, "<c-f>", function()
-  if not require("noice.lsp").scroll(4) then return "<c-f>" end
+    if not require("noice.lsp").scroll(4) then return "<c-f>" end
 end, { silent = true, expr = true, desc = "Scroll Hover Forward" })
 
 keymap.set({ "n", "i", "s" }, "<c-b>", function()
-  if not require("noice.lsp").scroll(-4) then return "<c-b>" end
+    if not require("noice.lsp").scroll(-4) then return "<c-b>" end
 end, { silent = true, expr = true, desc = "Scroll Hover Backward" })
 
 -- =============================================================================
@@ -132,16 +162,16 @@ keymap.set("n", "<leader>gc", "<cmd>DiffviewClose<CR>", { desc = "Git: Close Dif
 -- Resession (Session Management)
 -- Save the current session
 keymap.set("n", "<leader>ss", function()
-  require("resession").save(vim.fn.getcwd(), { dir = "dirsession" })
+    require("resession").save(vim.fn.getcwd(), { dir = "dirsession" })
 end, { desc = "Session: Save current" })
 
 -- Load a session
 keymap.set("n", "<leader>sl", function()
-  vim.cmd("silent! wa")
-  require("resession").load(nil, { dir = "dirsession" })
+    vim.cmd("silent! wa")
+    require("resession").load(nil, { dir = "dirsession" })
 end, { desc = "Session: Load/Select" })
 
 -- Delete a session
 keymap.set("n", "<leader>sd", function()
-  require("resession").delete(nil, { dir = "dirsession" })
+    require("resession").delete(nil, { dir = "dirsession" })
 end, { desc = "Session: Delete" })

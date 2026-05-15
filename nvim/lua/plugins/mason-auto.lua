@@ -24,6 +24,7 @@ return {
           "cssls",
           "gopls",
           "rust-analyzer",
+          "intelephense",
 
           -- Formatters/Linters
           "stylua",
@@ -32,6 +33,9 @@ return {
           "isort",
           "clang-format",
           "goimports",
+          "php-cs-fixer", 
+          "phpstan",      
+          "phpcs",       
 
 
         },
