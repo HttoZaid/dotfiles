@@ -1,19 +1,48 @@
-vim.env.TERMINAL = "kitty"
+if vim.env.VSCODE then
+  vim.g.vscode = true
+end
 
-local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
-  vim.fn.system({
-    "git", "clone", "--filter=blob:none",
-    "https://github.com/folke/lazy.nvim.git", "--branch=stable", lazypath,
+if vim.loader then
+  vim.loader.enable()
+end
+
+_G.dd = function(...)
+  require("snacks.debug").inspect(...)
+end
+_G.bt = function(...)
+  require("snacks.debug").backtrace()
+end
+_G.p = function(...)
+  require("snacks.debug").profile(...)
+end
+vim._print = function(_, ...)
+  dd(...)
+end
+
+if vim.env.PROF then
+  vim.opt.rtp:append("/home/folke/projects/snacks.nvim/")
+  require("snacks.profiler").startup({
+    startup = {
+      -- event = "UIEnter",
+      -- event = "VeryLazy",
+    },
+    runtime = "~/projects/neovim/runtime",
   })
 end
-vim.opt.rtp:prepend(lazypath)
 
-vim.g.mapleader = " "
-vim.g.maplocalleader = " "
+pcall(require, "config.env")
 
--- Load Plugin Manager and Core files
-require("core.options")
-require("core.neovide")
-require("lazy").setup("plugins")
-require("core.keymaps")
+require("config.lazy").load({
+  -- debug = false,
+  profiling = {
+    loader = false,
+    require = true,
+  },
+})
+
+vim.api.nvim_create_autocmd("User", {
+  pattern = "VeryLazy",
+  callback = function()
+    require("util").version()
+  end,
+})
