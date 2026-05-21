@@ -63,21 +63,35 @@ return {
       },
     },
   },
-
   {
     "stevearc/conform.nvim",
     optional = true,
     opts = {
+      formatters_by_ft = {
+        php = { "pint", "php_cs_fixer", stop_after_first = true },
+      },
       formatters = {
         dprint = {
           condition = function(_, ctx)
             return vim.fs.find({ "dprint.json" }, { path = ctx.filename, upward = true })[1]
           end,
         },
+        pint = {
+          condition = function(_, ctx)
+            return vim.fs.find({ "pint.json" }, { path = ctx.filename, upward = true })[1]
+          end,
+        },
+        php_cs_fixer = {
+          condition = function(_, ctx)
+            return vim.fs.find(
+              { ".php-cs-fixer.php", ".php-cs-fixer.dist.php" },
+              { path = ctx.filename, upward = true }
+            )[1]
+          end,
+        },
       },
     },
   },
-
   {
     "mfussenegger/nvim-lint",
     opts = {
@@ -88,22 +102,18 @@ return {
         selene = {
           condition = function()
             local root = LazyVim.root.get({ normalize = true })
-
             if root ~= vim.uv.cwd() then
               return false
             end
-
             return vim.fs.find({ "selene.toml" }, { path = root, upward = true })[1]
           end,
         },
         luacheck = {
           condition = function()
             local root = LazyVim.root.get({ normalize = true })
-
             if root ~= vim.uv.cwd() then
               return false
             end
-
             return vim.fs.find({ ".luacheckrc" }, { path = root, upward = true })[1]
           end,
         },
