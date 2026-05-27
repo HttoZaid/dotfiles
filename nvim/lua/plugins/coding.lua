@@ -1,11 +1,24 @@
 return {
   {
-    "folke/ts-comments.nvim",
-    opts = {
-      langs = {
-        dts = "// %s",
+      "folke/ts-comments.nvim",
+      opts = {
+        langs = {
+          c = {
+            line = "// %s",
+            block = "/* %s */",
+          },
+
+          cpp = {
+            line = "// %s",
+            block = "/* %s */",
+          },
+
+          dts = {
+            line = "// %s",
+            block = "/* %s */",
+          },
+        },
       },
-    },
   },
   {
     "pwntester/octo.nvim",
