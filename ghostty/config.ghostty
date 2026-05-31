@@ -1,8 +1,9 @@
 # Font
-font-family = JetBrainsMono Nerd Font
-font-size = 12
-font-feature = -calt
-font-feature = -liga
+font-family = "Monaspace Neon"
+font-size = 13
+font-style = "Regular"
+
+font-feature = ["calt", "liga", "ss01", "ss02", "ss03", "ss09"]
 
 # Theme
 theme = dark:Adwaita Dark,light:Adwaita
