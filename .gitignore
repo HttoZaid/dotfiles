@@ -3,3 +3,9 @@ nvim/.repro/
 **/undo/
 **/backups/
 **/swp/
+
+/.claude/*
+!/.claude/skills/
+!/.claude/skills/**
+!/.claude/plugins/
+!/.claude/plugins/**
