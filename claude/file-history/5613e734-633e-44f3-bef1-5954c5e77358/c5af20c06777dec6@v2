@@ -1,7 +1,0 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:here_sdk/navigation.dart';
-
-/// Live [RouteProgress] events emitted by [NavStateNotifier.onProgress].
-/// Null before a drive starts or after it ends.
-/// Widgets reading this rebuild on every GPS tick — keep them cheap.
-final driveProgressProvider = StateProvider<RouteProgress?>((ref) => null);
