@@ -1,0 +1,19 @@
+import { renderTemplate } from "../_lib/render";
+
+export type PasswordResetEmailArgs = {
+  to: string;
+  resetLink: string;
+};
+
+export async function buildPasswordResetEmail(
+  args: PasswordResetEmailArgs,
+): Promise<{ subject: string; html: string }> {
+  const html = await renderTemplate("password-reset", {
+    reset_link: args.resetLink,
+  });
+
+  return {
+    subject: "Reset your Learnalyze password",
+    html,
+  };
+}

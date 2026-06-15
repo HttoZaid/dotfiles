@@ -1,0 +1,98 @@
+import { createClient } from "@/lib/supabase/server";
+import type { AnalyticsSummary } from "../_lib/analytics-types";
+import { regenerateAnalyticsSummary } from "../_actions/regenerate-analytics-summary";
+
+// `analytics_summaries` is not in the generated Database types.
+// We cast the table name string to a known table name to preserve `this` binding
+// on the Supabase client, then cast the result to our own typed shape.
+type TableName = Parameters<Awaited<ReturnType<typeof createClient>>["from"]>[0];
+
+type SummaryRow = {
+  source_fingerprint: string;
+  strengths: unknown;
+  growth_opportunities: unknown;
+  generated_at: string;
+};
+
+type SummaryQueryResult = { data: SummaryRow | null; error: { message: string } | null };
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as string[];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export async function getAnalyticsSummary(): Promise<AnalyticsSummary | null> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return null;
+
+  const { data: analyses } = await supabase
+    .from("lessons")
+    .select(`id, lesson_analyses ( id, created_at )`)
+    .order("created_at", {
+      referencedTable: "lesson_analyses",
+      ascending: false,
+    })
+    .limit(1, { referencedTable: "lesson_analyses" });
+
+  const analysedIds = (analyses ?? [])
+    .filter((l) => l.lesson_analyses && l.lesson_analyses.length > 0)
+    .map((l) => l.lesson_analyses[0])
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  if (analysedIds.length < 3) return null;
+
+  const fingerprint = analysedIds.map((a) => `${a.id}|${a.created_at}`).join("|");
+
+  const { data: row, error: rowError } = await supabase
+    .from("analytics_summaries" as TableName)
+    .select("*")
+    .eq("scope_type", "teacher")
+    .eq("scope_id", user.id)
+    .maybeSingle() as unknown as SummaryQueryResult;
+
+  if (rowError) {
+    console.error("getAnalyticsSummary: fetch error", rowError);
+    return null;
+  }
+
+  const stale = !row || row.source_fingerprint !== fingerprint;
+
+  if (row) {
+    if (stale) {
+      regenerateAnalyticsSummary();
+    }
+    return {
+      strengths: parseStringArray(row.strengths),
+      growthOpportunities: parseStringArray(row.growth_opportunities),
+      generatedAt: row.generated_at,
+      stale,
+    };
+  }
+
+  const result = await regenerateAnalyticsSummary();
+  if (!result.success) return null;
+
+  const { data: freshRow } = await supabase
+    .from("analytics_summaries" as TableName)
+    .select("*")
+    .eq("scope_type", "teacher")
+    .eq("scope_id", user.id)
+    .maybeSingle() as unknown as SummaryQueryResult;
+
+  if (!freshRow) return null;
+
+  return {
+    strengths: parseStringArray(freshRow.strengths),
+    growthOpportunities: parseStringArray(freshRow.growth_opportunities),
+    generatedAt: freshRow.generated_at,
+    stale: false,
+  };
+}

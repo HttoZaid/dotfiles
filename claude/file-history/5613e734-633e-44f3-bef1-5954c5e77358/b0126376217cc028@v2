@@ -1,0 +1,334 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/mapview.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/checkpoint_action_sheet_widget.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/nearby_checkpoint_popup.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_bottom_sheet.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_overlay_buttons.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_search_bar.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_speed_overlay.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/navigation_phase.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/sheet_state.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/nav_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/sheet_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/strings.dart';
+import 'package:ukcheckpoints_app/features/navigation/widgets/drive_banner.dart';
+
+class MapScreen extends ConsumerStatefulWidget {
+  const MapScreen({super.key});
+
+  @override
+  ConsumerState<MapScreen> createState() => _MapScreenState();
+}
+
+class _MapScreenState extends ConsumerState<MapScreen> {
+  MapImage? _activeIcon;
+  MapImage? _inactiveIcon;
+  MapImage? _policeIcon;
+  MapImage? _unknownIcon;
+
+  List<Checkpoint>? _pendingCheckpoints;
+
+  // The first confirmed GPS fix. HereMap is not rendered until this is set.
+  GeoCoordinates? _initialLocation;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadIcons());
+  }
+
+  Future<void> _loadIcons() async {
+    _activeIcon = await _loadImage('assets/images/marker_active.png');
+    _inactiveIcon = await _loadImage('assets/images/marker_inactive.png');
+    _policeIcon = await _loadImage('assets/images/marker_police.png');
+    _unknownIcon = await _loadImage('assets/images/marker_unknown.png');
+    if (!mounted) return;
+
+    final checkpoints =
+        _pendingCheckpoints ??
+        ref.read(checkpointNotifierProvider).value?.checkpoints ??
+        [];
+    if (checkpoints.isNotEmpty) {
+      _updateMapCheckpoints(checkpoints);
+      _pendingCheckpoints = null;
+    }
+  }
+
+  void _updateMapCheckpoints(List<Checkpoint> checkpoints) {
+    final active = _activeIcon;
+    final inactive = _inactiveIcon;
+    final police = _policeIcon;
+    final unknown = _unknownIcon;
+
+    if (active == null ||
+        inactive == null ||
+        police == null ||
+        unknown == null) {
+      _pendingCheckpoints = checkpoints;
+      return;
+    }
+
+    ref.read(mapControllerProvider.notifier).updateCheckpoints(checkpoints, {
+      ContributionStatusEnum.ACTIVE: active,
+      ContributionStatusEnum.INACTIVE: inactive,
+      ContributionStatusEnum.POLICE_ALERT: police,
+      ContributionStatusEnum.UNKNOWN: unknown,
+    });
+  }
+
+  Future<MapImage> _loadImage(String asset) async {
+    final bytes = await rootBundle.load(asset);
+    return MapImage.withPixelDataAndImageFormat(
+      bytes.buffer.asUint8List(),
+      ImageFormat.png,
+    );
+  }
+
+  void _onMapCreated(HereMapController hereMapController) {
+    // Center the map instantly on the known location — no animation, no jump.
+    final loc = _initialLocation;
+    if (loc != null) {
+      hereMapController.camera.lookAtPointWithMeasure(
+        loc,
+        MapMeasure(MapMeasureKind.distanceInMeters, 1200),
+      );
+    }
+
+    ref.read(mapControllerProvider.notifier).setController(
+      hereMapController,
+      _onCheckpointTapped,
+    );
+
+    // Pre-warm _lastLocation in the controller so the next GPS update from
+    // the stream doesn't trigger the fly-to animation again.
+    if (loc != null) {
+      ref.read(mapControllerProvider.notifier).setInitialLocation(loc);
+    }
+
+    hereMapController.camera.addListener(
+      MapCameraListener((cameraState) {
+        ref.read(mapBearingProvider.notifier).state =
+            cameraState.orientationAtTarget.bearing;
+      }),
+    );
+  }
+
+  void _onCheckpointTapped(String checkpointId) {
+    final checkpoints =
+        ref.read(checkpointNotifierProvider).value?.checkpoints ?? [];
+    final checkpoint =
+        checkpoints.where((c) => c.id == checkpointId).firstOrNull;
+    if (checkpoint != null && context.mounted) {
+      unawaited(
+        showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => CheckpointActionSheet(checkpoint: checkpoint),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // First GPS fix → store initial location and trigger rebuild to show map.
+    ref
+      ..listen(userLocationStreamProvider, (_, next) {
+        final pos = next.value;
+        if (pos == null) return;
+        final coords = GeoCoordinates(pos.latitude, pos.longitude);
+
+        if (_initialLocation == null) {
+          setState(() => _initialLocation = coords);
+        } else {
+          // Map is rendered; pass updates to the controller directly.
+          ref.read(mapControllerProvider.notifier).updateLocation(coords);
+        }
+      })
+      ..listen(checkpointNotifierProvider, (_, next) {
+        next.whenData((data) {
+          _updateMapCheckpoints(data.checkpoints);
+        });
+      });
+
+    // Block rendering until we have a confirmed location.
+    if (_initialLocation == null) {
+      return const _LocationAcquiringScreen();
+    }
+
+    final phase = ref.watch(navStateNotifierProvider);
+    final isDriving = phase is ActiveDrive;
+
+    return Scaffold(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // Pixel offset of the sheet's peek edge from the bottom of the body.
+          // Overlay controls sit just above this line; the sheet slides up
+          // and covers them when expanded to half or full.
+          final peekEdge = constraints.maxHeight * kMapSheetMinExtent + 16;
+
+          return Stack(
+            children: [
+              Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (_) {
+                  FocusScope.of(context).unfocus();
+                  // "Changed my mind": tapping the map while in full search
+                  // peeks the sheet without discarding typed text.
+                  if (ref.read(sheetStateNotifierProvider).mode ==
+                      SheetMode.fullSearch) {
+                    ref.read(sheetStateNotifierProvider.notifier).peek();
+                  }
+                },
+                child: HereMap(onMapCreated: _onMapCreated),
+              ),
+
+              // Controls anchored just above the peek line.
+              // Hidden while driving — the nav header takes that role.
+              if (!isDriving)
+                Positioned(
+                  bottom: peekEdge,
+                  right: 16,
+                  child: const MapOverlayButtons(),
+                ),
+
+              if (!isDriving)
+                Positioned(
+                  bottom: peekEdge,
+                  left: 16,
+                  child: const MapSpeedOverlay(),
+                ),
+
+              Positioned(
+                bottom: peekEdge,
+                left: 0,
+                right: 0,
+                child: const NearbyCheckpointPopup(),
+              ),
+
+              // Recenter button — large, bottom-right, shown only when the
+              // user has detached the camera during a drive.
+              if (isDriving && phase.camera == CameraOwnership.free)
+                Positioned(
+                  bottom: peekEdge,
+                  right: 16,
+                  child: _RecenterButton(
+                    onTap: () => ref
+                        .read(navStateNotifierProvider.notifier)
+                        .recenter(),
+                  ),
+                ),
+
+              // Top overlay: drive banner while driving, search bar otherwise.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: isDriving
+                    ? const DriveBanner()
+                    : MapSearchBar(
+                        onCheckpointSelected: (checkpoint) {
+                          ref
+                              .read(mapControllerProvider.notifier)
+                              .focusOnCheckpoint(checkpoint);
+                        },
+                      ),
+              ),
+
+              // Sheet is topmost — slides up and covers controls in half/full
+              // mode; transparent area passes touches through to the map.
+              const Positioned.fill(child: MapBottomSheet()),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Recenter FAB ────────────────────────────────────────────────────────────
+
+class _RecenterButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _RecenterButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sp4),
+        decoration: BoxDecoration(
+          color: ThemeColors.surface,
+          borderRadius: ThemeRadius.brFull,
+          boxShadow: ThemeShadows.overlay,
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.my_location, size: 18, color: ThemeColors.accent),
+            SizedBox(width: ThemeSpacing.sp2),
+            Text(
+              NavStrings.recenterCta,
+              style: TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: ThemeColors.accent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Splash shown while waiting for first GPS fix ─────────────
+
+class _LocationAcquiringScreen extends StatelessWidget {
+  const _LocationAcquiringScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: ThemeColors.bg,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: ThemeColors.accent,
+              ),
+            ),
+            SizedBox(height: ThemeSpacing.sp3),
+            Text(
+              'Acquiring location…',
+              style: TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 13,
+                color: ThemeColors.textTertiary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

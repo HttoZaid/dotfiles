@@ -1,0 +1,630 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart' show Colors;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/gestures.dart';
+import 'package:here_sdk/mapview.dart';
+import 'package:here_sdk/prefetcher.dart';
+import 'package:here_sdk/routing.dart' show Route;
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+
+import 'package:ukcheckpoints_app/core/utils/logger.dart';
+import 'package:ukcheckpoints_app/features/map/data/map_preferences_repository.dart';
+
+part 'map_controller.g.dart';
+
+final mapBearingProvider = StateProvider<double>((ref) => 0.0);
+
+final currentMapSchemeProvider = StateProvider<MapScheme>(
+  (ref) => MapScheme.normalDay,
+);
+
+final isTrafficEnabledProvider = StateProvider<bool>((ref) => false);
+
+final isPublicTransitEnabledProvider = StateProvider<bool>((ref) => false);
+
+final isSafetyCamerasEnabledProvider = StateProvider<bool>((ref) => false);
+
+final isTrafficLightsEnabledProvider = StateProvider<bool>((ref) => false);
+
+final isCongestionZonesEnabledProvider = StateProvider<bool>((ref) => false);
+
+final isRoadExitLabelsEnabledProvider = StateProvider<bool>((ref) => false);
+
+@Riverpod(keepAlive: true)
+class MapController extends _$MapController {
+  LocationIndicator? _locationIndicator;
+  GeoCoordinates? _lastLocation;
+
+  // Keyed by checkpointId for O(1) diffing.
+  final Map<String, MapMarker> _markerById = {};
+  bool _checkpointsVisible = true;
+
+  PolygonPrefetcher? _prefetcher;
+  bool _hasPrefetched = false;
+
+  // Route preview visuals — cleared when a drive starts or trip is closed.
+  MapPolyline? _routePolyline;
+  MapMarker?  _routeOriginMarker;
+  MapMarker?  _routeDestMarker;
+
+  @override
+  HereMapController? build() {
+    ref.onDispose(() {
+      _locationIndicator = null;
+      _markerById.clear();
+    });
+    return null;
+  }
+
+  void setController(
+    HereMapController controller,
+    void Function(String) onCheckpointTap,
+  ) {
+    state = controller;
+    _setupLocationIndicator(controller);
+    _setupGestureListeners(controller, onCheckpointTap);
+    unawaited(_loadAndApplyPreferences());
+  }
+
+  Future<void> _loadAndApplyPreferences() async {
+    final prefs = ref.read(mapPreferencesRepositoryProvider);
+    final schemeName = await prefs.getMapScheme();
+    final trafficOn = await prefs.isTrafficEnabled();
+    final transitOn = await prefs.isPublicTransitEnabled();
+    final camerasOn = await prefs.isSafetyCamerasEnabled();
+    final lightsOn = await prefs.isTrafficLightsEnabled();
+    final zonesOn = await prefs.isCongestionZonesEnabled();
+    final exitsOn = await prefs.isRoadExitLabelsEnabled();
+
+    final scheme = MapScheme.values.firstWhere(
+      (s) => s.name == schemeName,
+      orElse: () => MapScheme.normalDay,
+    );
+
+    ref.read(isTrafficEnabledProvider.notifier).state = trafficOn;
+    ref.read(isPublicTransitEnabledProvider.notifier).state = transitOn;
+    ref.read(isSafetyCamerasEnabledProvider.notifier).state = camerasOn;
+    ref.read(isTrafficLightsEnabledProvider.notifier).state = lightsOn;
+    ref.read(isCongestionZonesEnabledProvider.notifier).state = zonesOn;
+    ref.read(isRoadExitLabelsEnabledProvider.notifier).state = exitsOn;
+
+    if (state != null) {
+      setMapScheme(scheme, refocus: true);
+    }
+  }
+
+  void _setupGestureListeners(
+    HereMapController controller,
+    void Function(String) onCheckpointTap,
+  ) {
+    controller.gestures.tapListener = TapListener((Point2D point) {
+      final current = state;
+      if (current == null) return;
+
+      current.pick(
+        MapSceneMapPickFilter([MapSceneMapPickFilterContentType.mapItems]),
+        Rectangle2D(point, Size2D(40, 40)),
+        (MapPickResult? result) {
+          final marker = result?.mapItems?.markers.firstOrNull;
+          if (marker == null) return;
+          final id = marker.metadata?.getString('checkpointId');
+          if (id != null) onCheckpointTap(id);
+        },
+      );
+    });
+  }
+
+  void _setupLocationIndicator(HereMapController controller) {
+    _locationIndicator = LocationIndicator.withMapView(controller)
+      ..locationIndicatorStyle = LocationIndicatorIndicatorStyle.pedestrian
+      ..enable(controller);
+  }
+
+  // Called once from _onMapCreated when the map is already centered on the
+  // user's position. Sets _lastLocation so updateLocation won't trigger the
+  // fly animation on the next GPS update.
+  void setInitialLocation(GeoCoordinates coordinates) {
+    _lastLocation = coordinates;
+    _locationIndicator?.updateLocation(Location.withCoordinates(coordinates));
+    _prefetchAroundLocation(coordinates);
+  }
+
+  void updateLocation(GeoCoordinates coordinates) {
+    final isFirstLocation = _lastLocation == null;
+    _lastLocation = coordinates;
+    _locationIndicator?.updateLocation(Location.withCoordinates(coordinates));
+
+    if (isFirstLocation) {
+      focusOnUserLocation();
+      _prefetchAroundLocation(coordinates);
+    }
+  }
+
+  void _prefetchAroundLocation(GeoCoordinates coords) {
+    final engine = SDKNativeEngine.sharedInstance;
+    if (engine == null || _hasPrefetched) return;
+    _hasPrefetched = true;
+
+    _prefetcher ??= PolygonPrefetcher(engine);
+    final polygon = GeoPolygon.withGeoCircle(GeoCircle(coords, 3000));
+    _prefetcher!.prefetch(
+      polygon,
+      PrefetchStatusListener(
+        (_) {},
+        (error) {
+          if (error != null) {
+            AppLogger.error(
+              'Tile prefetch failed',
+              error: error,
+              stackTrace: StackTrace.current,
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  void focusOnUserLocation() {
+    _animateTo(_lastLocation);
+  }
+
+  void focusOnCoordinates(GeoCoordinates coords) {
+    _animateTo(coords);
+  }
+
+  void _animateTo(GeoCoordinates? coords) {
+    if (coords == null || state == null) return;
+    final animation = MapCameraAnimationFactory.flyToWithZoom(
+      GeoCoordinatesUpdate(coords.latitude, coords.longitude),
+      MapMeasure(MapMeasureKind.distanceInMeters, 1000),
+      0,
+      const Duration(milliseconds: 800),
+    );
+    state!.camera.startAnimation(animation);
+  }
+
+  void resetOrientationToNorth() {
+    final controller = state;
+    if (controller == null) return;
+
+    final cameraState = controller.camera.state;
+    final animation = MapCameraAnimationFactory.flyToWithOrientationAndZoom(
+      GeoCoordinatesUpdate(
+        cameraState.targetCoordinates.latitude,
+        cameraState.targetCoordinates.longitude,
+      ),
+      GeoOrientationUpdate(0, cameraState.orientationAtTarget.tilt),
+      MapMeasure(
+        MapMeasureKind.distanceInMeters,
+        cameraState.distanceToTargetInMeters,
+      ),
+      0,
+      const Duration(milliseconds: 600),
+    );
+    controller.camera.startAnimation(animation);
+
+    ref.read(mapBearingProvider.notifier).state = 0.0;
+  }
+
+  // Builds a new MapMarker for a checkpoint, embedding its status in metadata
+  // so the diff logic can detect when the icon needs refreshing.
+  MapMarker _buildMarker(
+    Checkpoint checkpoint,
+    Map<ContributionStatusEnum, MapImage> icons,
+  ) {
+    final status = checkpoint.contributions.isNotEmpty
+        ? checkpoint.contributions.first.status
+        : ContributionStatusEnum.UNKNOWN;
+    final icon = icons[status] ?? icons[ContributionStatusEnum.UNKNOWN]!;
+    return MapMarker(
+      GeoCoordinates(
+        checkpoint.latitude.toDouble(),
+        checkpoint.longitude.toDouble(),
+      ),
+      icon,
+    )..metadata = (Metadata()
+      ..setString('checkpointId', checkpoint.id)
+      ..setString('status', status.name));
+  }
+
+  ContributionStatusEnum _statusFor(Checkpoint checkpoint) =>
+      checkpoint.contributions.isNotEmpty
+          ? checkpoint.contributions.first.status
+          : ContributionStatusEnum.UNKNOWN;
+
+  // ── Checkpoint visibility (hidden during active drive) ────────────────────
+
+  void hideCheckpoints() {
+    if (!_checkpointsVisible) return;
+    _checkpointsVisible = false;
+    final controller = state;
+    if (controller == null || _markerById.isEmpty) return;
+    controller.mapScene.removeMapMarkers(_markerById.values.toList());
+  }
+
+  void showCheckpoints() {
+    if (_checkpointsVisible) return;
+    _checkpointsVisible = true;
+    final controller = state;
+    if (controller == null || _markerById.isEmpty) return;
+    controller.mapScene.addMapMarkers(_markerById.values.toList());
+  }
+
+  // Diffs the current marker set against the incoming checkpoints:
+  // only removes stale markers and adds new/changed ones, in batches.
+  void updateCheckpoints(
+    List<Checkpoint> checkpoints,
+    Map<ContributionStatusEnum, MapImage> icons,
+  ) {
+    final controller = state;
+    if (controller == null) return;
+
+    final desired = {for (final c in checkpoints) c.id: c};
+
+    // Remove markers no longer needed.
+    final staleIds = _markerById.keys
+        .where((id) => !desired.containsKey(id))
+        .toList();
+    if (staleIds.isNotEmpty) {
+      if (_checkpointsVisible) {
+        controller.mapScene.removeMapMarkers(
+          staleIds.map((id) => _markerById[id]!).toList(),
+        );
+      }
+      staleIds.forEach(_markerById.remove);
+    }
+
+    // Add new markers and refresh any whose status changed.
+    final toAdd = <MapMarker>[];
+    for (final checkpoint in checkpoints) {
+      final existing = _markerById[checkpoint.id];
+      if (existing != null) {
+        final currentStatus = existing.metadata?.getString('status');
+        if (currentStatus == _statusFor(checkpoint).name) continue;
+        // Status changed — replace.
+        if (_checkpointsVisible) {
+          controller.mapScene.removeMapMarker(existing);
+        }
+        _markerById.remove(checkpoint.id);
+      }
+      final marker = _buildMarker(checkpoint, icons);
+      toAdd.add(marker);
+      _markerById[checkpoint.id] = marker;
+    }
+    if (toAdd.isNotEmpty && _checkpointsVisible) {
+      controller.mapScene.addMapMarkers(toAdd);
+    }
+  }
+
+  void setMapScheme(MapScheme scheme, {bool refocus = false}) {
+    ref.read(currentMapSchemeProvider.notifier).state = scheme;
+
+    unawaited(
+      ref.read(mapPreferencesRepositoryProvider).setMapScheme(scheme.name),
+    );
+
+    final coordinates = refocus ? _lastLocation : null;
+
+    final options = MapSceneLoadOptionsBuilder().withMapScheme(scheme).build();
+    state?.mapScene.loadScene(options, (MapError? error) {
+      if (error != null) {
+        AppLogger.error(
+          'Map scene load failed',
+          error: error,
+          stackTrace: StackTrace.current,
+        );
+        return;
+      }
+      _reapplyFeatures();
+      if (coordinates != null) {
+        _animateTo(coordinates);
+      }
+    });
+  }
+
+  void _reapplyFeatures() {
+    final controller = state;
+    if (controller == null) return;
+
+    final scheme = ref.read(currentMapSchemeProvider);
+    if (scheme == MapScheme.satellite) return;
+
+    final trafficOn = ref.read(isTrafficEnabledProvider);
+    final transitOn = ref.read(isPublicTransitEnabledProvider);
+    final camerasOn = ref.read(isSafetyCamerasEnabledProvider);
+    final lightsOn = ref.read(isTrafficLightsEnabledProvider);
+    final zonesOn = ref.read(isCongestionZonesEnabledProvider);
+    final exitsOn = ref.read(isRoadExitLabelsEnabledProvider);
+
+    if (trafficOn) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.trafficFlow: MapFeatureModes.trafficFlowWithFreeFlow,
+        MapFeatures.trafficIncidents: MapFeatureModes.trafficIncidentsAll,
+      });
+    }
+    if (transitOn) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.publicTransit: MapFeatureModes.publicTransitAll,
+      });
+    }
+    if (camerasOn) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.safetyCameras: MapFeatureModes.safetyCamerasAll,
+      });
+    }
+    if (lightsOn) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.trafficLights: MapFeatureModes.trafficLightsAll,
+      });
+    }
+    if (zonesOn) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.congestionZones: MapFeatureModes.congestionZonesAll,
+      });
+    }
+    if (exitsOn) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.roadExitLabels: MapFeatureModes.roadExitLabelsAll,
+      });
+    }
+  }
+
+  void toggleTrafficFlow() {
+    final newValue = !ref.read(isTrafficEnabledProvider);
+    ref.read(isTrafficEnabledProvider.notifier).state = newValue;
+
+    unawaited(
+      ref.read(mapPreferencesRepositoryProvider).setTrafficEnabled(newValue),
+    );
+
+    final controller = state;
+    if (controller == null) return;
+
+    if (ref.read(currentMapSchemeProvider) == MapScheme.satellite) return;
+
+    if (newValue) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.trafficFlow: MapFeatureModes.trafficFlowWithFreeFlow,
+        MapFeatures.trafficIncidents: MapFeatureModes.trafficIncidentsAll,
+      });
+    } else {
+      controller.mapScene.disableFeatures([
+        MapFeatures.trafficFlow,
+        MapFeatures.trafficIncidents,
+      ]);
+    }
+  }
+
+  void togglePublicTransit() {
+    final newValue = !ref.read(isPublicTransitEnabledProvider);
+    ref.read(isPublicTransitEnabledProvider.notifier).state = newValue;
+
+    unawaited(
+      ref
+          .read(mapPreferencesRepositoryProvider)
+          .setPublicTransitEnabled(newValue),
+    );
+
+    final controller = state;
+    if (controller == null) return;
+
+    if (ref.read(currentMapSchemeProvider) == MapScheme.satellite) return;
+
+    if (newValue) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.publicTransit: MapFeatureModes.publicTransitAll,
+      });
+    } else {
+      controller.mapScene.disableFeatures([MapFeatures.publicTransit]);
+    }
+  }
+
+  void toggleSafetyCameras() {
+    final newValue = !ref.read(isSafetyCamerasEnabledProvider);
+    ref.read(isSafetyCamerasEnabledProvider.notifier).state = newValue;
+
+    unawaited(
+      ref
+          .read(mapPreferencesRepositoryProvider)
+          .setSafetyCamerasEnabled(newValue),
+    );
+
+    final controller = state;
+    if (controller == null) return;
+    if (ref.read(currentMapSchemeProvider) == MapScheme.satellite) return;
+
+    if (newValue) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.safetyCameras: MapFeatureModes.safetyCamerasAll,
+      });
+    } else {
+      controller.mapScene.disableFeatures([MapFeatures.safetyCameras]);
+    }
+  }
+
+  void toggleTrafficLights() {
+    final newValue = !ref.read(isTrafficLightsEnabledProvider);
+    ref.read(isTrafficLightsEnabledProvider.notifier).state = newValue;
+
+    unawaited(
+      ref
+          .read(mapPreferencesRepositoryProvider)
+          .setTrafficLightsEnabled(newValue),
+    );
+
+    final controller = state;
+    if (controller == null) return;
+    if (ref.read(currentMapSchemeProvider) == MapScheme.satellite) return;
+
+    if (newValue) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.trafficLights: MapFeatureModes.trafficLightsAll,
+      });
+    } else {
+      controller.mapScene.disableFeatures([MapFeatures.trafficLights]);
+    }
+  }
+
+  void toggleCongestionZones() {
+    final newValue = !ref.read(isCongestionZonesEnabledProvider);
+    ref.read(isCongestionZonesEnabledProvider.notifier).state = newValue;
+
+    unawaited(
+      ref
+          .read(mapPreferencesRepositoryProvider)
+          .setCongestionZonesEnabled(newValue),
+    );
+
+    final controller = state;
+    if (controller == null) return;
+    if (ref.read(currentMapSchemeProvider) == MapScheme.satellite) return;
+
+    if (newValue) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.congestionZones: MapFeatureModes.congestionZonesAll,
+      });
+    } else {
+      controller.mapScene.disableFeatures([MapFeatures.congestionZones]);
+    }
+  }
+
+  void toggleRoadExitLabels() {
+    final newValue = !ref.read(isRoadExitLabelsEnabledProvider);
+    ref.read(isRoadExitLabelsEnabledProvider.notifier).state = newValue;
+
+    unawaited(
+      ref
+          .read(mapPreferencesRepositoryProvider)
+          .setRoadExitLabelsEnabled(newValue),
+    );
+
+    final controller = state;
+    if (controller == null) return;
+    if (ref.read(currentMapSchemeProvider) == MapScheme.satellite) return;
+
+    if (newValue) {
+      controller.mapScene.enableFeatures({
+        MapFeatures.roadExitLabels: MapFeatureModes.roadExitLabelsAll,
+      });
+    } else {
+      controller.mapScene.disableFeatures([MapFeatures.roadExitLabels]);
+    }
+  }
+
+  // ── Route preview ──────────────────────────────────────────────────────────
+
+  Future<void> showRoute(Route route) async {
+    final controller = state;
+    if (controller == null) return;
+
+    clearRoute();
+
+    // Polyline: 24px blue with 6px white outline (physical pixels;
+    // ~8dp on a 3× screen — same weight as Google Maps route line).
+    final lineWidth = MapMeasureDependentRenderSize.withSingleSize(
+      RenderSizeUnit.pixels,
+      24,
+    );
+    final outlineWidth = MapMeasureDependentRenderSize.withSingleSize(
+      RenderSizeUnit.pixels,
+      6,
+    );
+    final rep = MapPolylineSolidRepresentation.withOutline(
+      lineWidth,
+      const ui.Color(0xFF3E5BFF),
+      outlineWidth,
+      Colors.white,
+      LineCap.round,
+    );
+    final polyline = MapPolyline.withRepresentation(route.geometry, rep);
+    controller.mapScene.addMapPolyline(polyline);
+    _routePolyline = polyline;
+
+    // Origin (blue) + dest (red) circle markers.
+    final verts = route.geometry.vertices;
+    if (verts.isNotEmpty) {
+      final originImg = await _circlePng(const ui.Color(0xFF3E5BFF), 20);
+      final destImg   = await _circlePng(const ui.Color(0xFFE63946), 24);
+
+      // State may have been cleared while we awaited the PNG renders.
+      if (state == null) return;
+
+      final originMarker = MapMarker(verts.first, originImg);
+      final destMarker   = MapMarker(verts.last,  destImg);
+      controller.mapScene.addMapMarker(originMarker);
+      controller.mapScene.addMapMarker(destMarker);
+      _routeOriginMarker = originMarker;
+      _routeDestMarker   = destMarker;
+    }
+
+    // Fit camera to the route bounding box (north-up, no tilt).
+    controller.camera.applyUpdate(
+      MapCameraUpdateFactory.lookAtArea(route.boundingBox),
+    );
+  }
+
+  void clearRoute() {
+    final controller = state;
+    if (controller == null) return;
+
+    if (_routePolyline != null) {
+      controller.mapScene.removeMapPolyline(_routePolyline!);
+      _routePolyline = null;
+    }
+    if (_routeOriginMarker != null) {
+      controller.mapScene.removeMapMarker(_routeOriginMarker!);
+      _routeOriginMarker = null;
+    }
+    if (_routeDestMarker != null) {
+      controller.mapScene.removeMapMarker(_routeDestMarker!);
+      _routeDestMarker = null;
+    }
+  }
+
+  // Renders a filled circle with a white halo as a PNG MapImage.
+  Future<MapImage> _circlePng(ui.Color color, double size) async {
+    final recorder = ui.PictureRecorder();
+    final canvas   = ui.Canvas(recorder);
+    final half     = size / 2;
+    canvas
+      ..drawCircle(
+        ui.Offset(half, half),
+        half,
+        ui.Paint()..color = const ui.Color(0xFFFFFFFF),
+      )
+      ..drawCircle(
+        ui.Offset(half, half),
+        half - 2,
+        ui.Paint()..color = color,
+      );
+    final picture = recorder.endRecording();
+    final img     = await picture.toImage(size.toInt(), size.toInt());
+    final bd      = await img.toByteData(format: ui.ImageByteFormat.png);
+    return MapImage.withPixelDataAndImageFormat(
+      bd!.buffer.asUint8List(),
+      ImageFormat.png,
+    );
+  }
+
+  void focusOnCheckpoint(Checkpoint checkpoint) {
+    final controller = state;
+    if (controller == null) return;
+
+    final animation = MapCameraAnimationFactory.flyToWithZoom(
+      GeoCoordinatesUpdate(
+        checkpoint.latitude.toDouble(),
+        checkpoint.longitude.toDouble(),
+      ),
+      MapMeasure(MapMeasureKind.distanceInMeters, 500),
+      0,
+      const Duration(milliseconds: 800),
+    );
+    controller.camera.startAnimation(animation);
+  }
+
+}

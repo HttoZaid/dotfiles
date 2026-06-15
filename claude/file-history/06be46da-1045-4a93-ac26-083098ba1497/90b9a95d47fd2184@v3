@@ -1,0 +1,40 @@
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/navigation.dart';
+import 'package:here_sdk/routing.dart';
+import 'package:here_sdk/transport.dart';
+
+// Single file that owns UK-imperial configuration for routing and navigation.
+// UnitSystem.imperialUk is the exact identifier — the lowercase 'k' matters.
+// This is the ONLY place in the codebase that references UnitSystem.imperialUk.
+//
+// CarOptions / PedestrianOptions are deprecated since SDK 4.28.0.
+// The replacement is RoutingOptions with TransportSpecification.
+
+/// Returns [RoutingOptions] for car routing with UK imperial units.
+RoutingOptions buildUkCarOptions() {
+  final options = RoutingOptions();
+  // Default transport mode is already TransportMode.car — no change needed.
+  options.textOptions.language = LanguageCode.enGb;
+  options.textOptions.unitSystem = UnitSystem.imperialUk;
+  return options;
+}
+
+/// Returns [RoutingOptions] for pedestrian routing with UK imperial units.
+RoutingOptions buildUkPedestrianOptions() {
+  final options = RoutingOptions();
+  options.transportSpecification.transportMode = TransportMode.pedestrian;
+  options.textOptions.language = LanguageCode.enGb;
+  options.textOptions.unitSystem = UnitSystem.imperialUk;
+  return options;
+}
+
+/// Sets UK imperial units on [navigator]'s voice/text notifications.
+///
+/// Call once immediately after constructing the [VisualNavigator].
+/// Must be called again if the navigator is ever recreated.
+void applyUkUnitsToNavigator(VisualNavigator navigator) {
+  final opts = ManeuverNotificationOptions.withDefaults();
+  opts.language = LanguageCode.enGb;
+  opts.unitSystem = UnitSystem.imperialUk;
+  navigator.maneuverNotificationOptions = opts;
+}

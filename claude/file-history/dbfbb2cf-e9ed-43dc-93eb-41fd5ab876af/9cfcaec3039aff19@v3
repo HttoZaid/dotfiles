@@ -1,0 +1,180 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/mapview.dart';
+import 'package:here_sdk/navigation.dart' hide Navigator;
+import 'package:here_sdk/prefetcher.dart';
+import 'package:here_sdk/routing.dart' show ManeuverAction, Route;
+
+import 'package:ukcheckpoints_app/core/utils/logger.dart';
+
+class GuidanceState {
+  final int currentManeuverIndex;
+  final int remainingDistanceMeters;
+  final Duration remainingEta;
+  final String? currentManeuverText;
+  final ManeuverAction? currentAction;
+  final int? nextManeuverDistance;
+  final int? nextManeuverIndex;
+  final String? nextManeuverText;
+  final ManeuverAction? nextManeuverAction;
+  final bool isActive;
+  final bool destinationReached;
+
+  const GuidanceState({
+    this.currentManeuverIndex = 0,
+    this.remainingDistanceMeters = 0,
+    this.remainingEta = Duration.zero,
+    this.currentManeuverText,
+    this.currentAction,
+    this.nextManeuverDistance,
+    this.nextManeuverIndex,
+    this.nextManeuverText,
+    this.nextManeuverAction,
+    this.isActive = false,
+    this.destinationReached = false,
+  });
+}
+
+class NavigationGuidanceNotifier extends StateNotifier<GuidanceState> {
+  VisualNavigator? _visualNavigator;
+  StreamSubscription<Position>? _locationSub;
+  RoutePrefetcher? _routePrefetcher;
+  int _previousManeuverIndex = -1;
+
+  NavigationGuidanceNotifier() : super(const GuidanceState());
+
+  @override
+  void dispose() {
+    stopGuidance();
+    super.dispose();
+  }
+
+  void startRendering(HereMapController mapController) {
+    try {
+      _visualNavigator = VisualNavigator()..startRendering(mapController);
+      // SDK drops to 30 fps when rendering starts; restore 60 for the idle map.
+      _visualNavigator!.guidanceFrameRate = 60;
+    } on Exception catch (e, st) {
+      AppLogger.error('VisualNavigator init failed', error: e, stackTrace: st);
+    }
+  }
+
+  void stopRendering() {
+    _visualNavigator?.stopRendering();
+  }
+
+  void startGuidance({
+    required Route route,
+    required Stream<Position> locationStream,
+  }) {
+    final nav = _visualNavigator;
+    if (nav == null) return;
+
+    nav
+      ..eventTextListener = EventTextListener((_) {})
+      ..routeProgressListener = RouteProgressListener((RouteProgress progress) {
+        final sections = progress.sectionProgress;
+        final remainingDistance =
+            sections.isNotEmpty ? sections.last.remainingDistanceInMeters : 0;
+        final remainingEta = sections.isNotEmpty
+            ? sections.last.remainingDuration
+            : Duration.zero;
+
+        final maneuvers = progress.maneuverProgress;
+        final nextDist = maneuvers.isNotEmpty
+            ? maneuvers.first.remainingDistanceInMeters
+            : null;
+        final curIndex =
+            maneuvers.isNotEmpty ? maneuvers.first.maneuverIndex : -1;
+
+        String? curText;
+        ManeuverAction? curAction;
+        if (curIndex >= 0) {
+          final m = nav.getManeuver(curIndex);
+          curText = m?.text;
+          curAction = m?.action;
+        }
+
+        int? lookAheadIndex;
+        String? lookAheadText;
+        ManeuverAction? lookAheadAction;
+        if (maneuvers.length > 1) {
+          lookAheadIndex = maneuvers[1].maneuverIndex;
+          if (lookAheadIndex >= 0) {
+            final m = nav.getManeuver(lookAheadIndex);
+            lookAheadText = m?.text;
+            lookAheadAction = m?.action;
+          }
+        }
+
+        if (curIndex != _previousManeuverIndex) {
+          _previousManeuverIndex = curIndex;
+        }
+
+        state = GuidanceState(
+          currentManeuverIndex: curIndex,
+          remainingDistanceMeters: remainingDistance,
+          remainingEta: remainingEta,
+          currentManeuverText: curText,
+          currentAction: curAction,
+          nextManeuverDistance: nextDist,
+          nextManeuverIndex: lookAheadIndex,
+          nextManeuverText: lookAheadText,
+          nextManeuverAction: lookAheadAction,
+          isActive: true,
+        );
+      })
+      ..routeDeviationListener = RouteDeviationListener((deviation) {
+        debugPrint('Route deviation: $deviation');
+      })
+      ..destinationReachedListener = DestinationReachedListener(() {
+        state = const GuidanceState(destinationReached: true);
+      })
+      ..route = route
+      // Auto-zoom and tilt during guidance for a proper navigation feel.
+      ..cameraBehavior = DynamicCameraBehavior();
+
+    // Continuously prefetch tiles ahead along the route to prevent tile pop-in.
+    final engine = SDKNativeEngine.sharedInstance;
+    if (engine != null) {
+      _routePrefetcher?.stopPrefetchAroundRoute();
+      _routePrefetcher ??= RoutePrefetcher(engine);
+      _routePrefetcher!.prefetchAroundRouteOnIntervals(nav);
+    }
+
+    unawaited(_locationSub?.cancel());
+    _locationSub = locationStream.listen((position) {
+      final location = Location.withCoordinates(
+        GeoCoordinates(position.latitude, position.longitude),
+      )
+        ..time = position.timestamp
+        ..speedInMetersPerSecond = position.speed;
+      nav.onLocationUpdated(location);
+    });
+  }
+
+  void stopGuidance() {
+    _visualNavigator
+      ?..route = null
+      ..cameraBehavior = null
+      ..routeProgressListener = null
+      ..eventTextListener = null
+      ..routeDeviationListener = null
+      ..destinationReachedListener = null;
+    _routePrefetcher?.stopPrefetchAroundRoute();
+    unawaited(_locationSub?.cancel());
+    _locationSub = null;
+    state = const GuidanceState();
+  }
+}
+
+final navigationGuidanceProvider = StateNotifierProvider<
+    NavigationGuidanceNotifier,
+    GuidanceState>((ref) {
+  return NavigationGuidanceNotifier();
+});

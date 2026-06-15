@@ -1,0 +1,279 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/routing.dart' show Maneuver;
+
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/navigation/maneuvers/maneuver_icons.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/navigation_phase.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/drive_progress_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/nav_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/strings.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/uk_formatter.dart';
+
+// 500 yards in metres — threshold for showing the secondary turn.
+const int _kSecondaryTurnThresholdMeters = 457;
+
+/// Top-of-screen banner during [ActiveDrive] and [Arrived].
+///
+/// Active drive: primary turn (always) + secondary turn (≤500 yards).
+/// Arrived: celebration card with destination name.
+/// AnimatedCrossFade handles the transition between the two states.
+class DriveBanner extends ConsumerWidget {
+  const DriveBanner({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final phase = ref.watch(navStateNotifierProvider);
+    if (phase is! ActiveDrive && phase is! Arrived) return const SizedBox.shrink();
+
+    final progress = ref.watch(driveProgressProvider);
+    final navNotifier = ref.read(navStateNotifierProvider.notifier);
+
+    final maneuverProgress = progress?.maneuverProgress ?? [];
+    final primaryMp = maneuverProgress.isNotEmpty ? maneuverProgress[0] : null;
+    final secondaryMp = maneuverProgress.length > 1 ? maneuverProgress[1] : null;
+
+    final primaryManeuver = primaryMp != null
+        ? navNotifier.getManeuver(primaryMp.maneuverIndex)
+        : null;
+
+    final showSecondary = secondaryMp != null &&
+        secondaryMp.remainingDistanceInMeters <= _kSecondaryTurnThresholdMeters;
+    final secondaryManeuver =
+        showSecondary ? navNotifier.getManeuver(secondaryMp.maneuverIndex) : null;
+
+    final isArrived = phase is Arrived;
+    // Inline type-check so Dart promotes phase to Arrived in the true branch.
+    final arrivedDestName = phase is Arrived ? phase.destName : '';
+
+    return Material(
+      color: ThemeColors.surface,
+      child: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 280),
+              sizeCurve: Curves.easeOut,
+              crossFadeState: isArrived
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              firstChild: _NavContent(
+                primaryManeuver: primaryManeuver,
+                primaryDistanceMeters: primaryMp?.remainingDistanceInMeters,
+                showSecondary: showSecondary,
+                secondaryManeuver: secondaryManeuver,
+                secondaryDistanceMeters:
+                    secondaryMp?.remainingDistanceInMeters,
+              ),
+              secondChild: _ArrivalContent(
+                destName: arrivedDestName,
+              ),
+            ),
+
+            // Rerouting overlay — sits over the instruction.
+            if (phase is ActiveDrive && phase.isRerouting)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: ThemeColors.surface.withValues(alpha: 0.92),
+                  child: const Center(
+                    child: Text(
+                      NavStrings.reroutingBanner,
+                      style: ThemeText.titleMedium,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Active navigation content ──────────────────────────────────────────────
+
+class _NavContent extends StatelessWidget {
+  final Maneuver? primaryManeuver;
+  final int? primaryDistanceMeters;
+  final bool showSecondary;
+  final Maneuver? secondaryManeuver;
+  final int? secondaryDistanceMeters;
+
+  const _NavContent({
+    required this.primaryManeuver,
+    required this.primaryDistanceMeters,
+    required this.showSecondary,
+    required this.secondaryManeuver,
+    required this.secondaryDistanceMeters,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final m = primaryManeuver;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp3,
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp3,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (m != null)
+                Image.asset(
+                  maneuverIconPath(m.action),
+                  width: 28,
+                  height: 28,
+                  color: ThemeColors.accent,
+                )
+              else
+                const SizedBox(width: 28, height: 28),
+
+              const SizedBox(width: ThemeSpacing.sp3),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      m?.text ?? '',
+                      style: ThemeText.titleLarge,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
+                    ),
+                    if (primaryDistanceMeters != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        UkFormatter.formatDistance(primaryDistanceMeters!),
+                        style: ThemeText.titleSmall.copyWith(
+                          color: ThemeColors.accent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // Secondary turn — animates in/out smoothly.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            child: showSecondary && secondaryManeuver != null
+                ? Padding(
+                    padding: const EdgeInsets.only(top: ThemeSpacing.sp2),
+                    child: Row(
+                      children: [
+                        // Indent to align with primary instruction text.
+                        const SizedBox(width: 28 + ThemeSpacing.sp3),
+                        Image.asset(
+                          maneuverIconPath(secondaryManeuver!.action),
+                          width: 18,
+                          height: 18,
+                          color: ThemeColors.textTertiary,
+                        ),
+                        const SizedBox(width: ThemeSpacing.sp2),
+                        const Text(
+                          NavStrings.thenLabel,
+                          style: ThemeText.labelSmall,
+                        ),
+                        const SizedBox(width: ThemeSpacing.sp1),
+                        Expanded(
+                          child: Text(
+                            secondaryManeuver!.text,
+                            style: ThemeText.bodySmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (secondaryDistanceMeters != null) ...[
+                          const SizedBox(width: ThemeSpacing.sp2),
+                          Text(
+                            UkFormatter.formatDistance(
+                              secondaryDistanceMeters!,
+                            ),
+                            style: ThemeText.labelSmall,
+                          ),
+                        ],
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Arrival celebration content ────────────────────────────────────────────
+
+class _ArrivalContent extends StatelessWidget {
+  final String destName;
+
+  const _ArrivalContent({required this.destName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp4,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: ThemeColors.accentSubtle,
+              borderRadius: BorderRadius.circular(ThemeRadius.medium),
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              size: 24,
+              color: ThemeColors.accent,
+            ),
+          ),
+
+          const SizedBox(width: ThemeSpacing.sp3),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  NavStrings.arrivedTitle,
+                  style: ThemeText.titleLarge,
+                ),
+                if (destName.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    destName,
+                    style: ThemeText.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

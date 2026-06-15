@@ -1,0 +1,115 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+
+class ReferralList extends StatelessWidget {
+  final List<ReferralDetails> referrals;
+
+  const ReferralList({required this.referrals, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    if (referrals.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: ThemeSpacing.sp4),
+          child: Text(
+            'Referral History',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: ThemeColors.textTertiary,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: referrals.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final ref = referrals[index];
+            return _ReferralTile(referral: ref);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ReferralTile extends StatelessWidget {
+  final ReferralDetails referral;
+
+  const _ReferralTile({required this.referral});
+
+  @override
+  Widget build(BuildContext context) {
+    final isCompleted = referral.status == ReferralDetailsStatusEnum.COMPLETED;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: ThemeSpacing.sp4),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: ThemeColors.stone100,
+              borderRadius: ThemeRadius.brMd,
+            ),
+            child: const Icon(
+              CupertinoIcons.person,
+              color: ThemeColors.stone500,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: ThemeSpacing.sp4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  referral.refereeUsername,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: ThemeColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  'Joined ${DateFormat('MMM d, yyyy').format(referral.referredAt)}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: ThemeColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: isCompleted ? ThemeColors.accentSubtle : ThemeColors.stone100,
+              borderRadius: ThemeRadius.brSm,
+            ),
+            child: Text(
+              referral.status.name,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color:
+                    isCompleted ? ThemeColors.accent : ThemeColors.textTertiary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

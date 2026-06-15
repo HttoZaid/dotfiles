@@ -1,0 +1,28 @@
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+
+const _channel = EventChannel('com.example.ukcheckpoints_app/gps');
+
+/// Stream of raw GPS fixes from [LocationManager.GPS_PROVIDER].
+/// Android-only. Bypasses the fused provider's 5 s floor so the HERE
+/// VisualNavigator interpolator gets ~1 Hz input.
+Stream<Position> get rawGpsStream =>
+    _channel.receiveBroadcastStream().map((raw) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      return Position(
+        latitude: (m['latitude'] as num).toDouble(),
+        longitude: (m['longitude'] as num).toDouble(),
+        timestamp: DateTime.fromMillisecondsSinceEpoch(
+          (m['time'] as num).toInt(),
+          isUtc: true,
+        ),
+        accuracy: (m['accuracy'] as num).toDouble(),
+        altitude: (m['altitude'] as num).toDouble(),
+        altitudeAccuracy: 0.0,
+        heading: (m['heading'] as num).toDouble(),
+        headingAccuracy: 0.0,
+        speed: (m['speed'] as num).toDouble(),
+        speedAccuracy: 0.0,
+        isMocked: m['isMocked'] as bool,
+      );
+    });

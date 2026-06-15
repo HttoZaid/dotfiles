@@ -1,0 +1,143 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+
+class CheckpointFilterBar extends ConsumerWidget {
+  const CheckpointFilterBar({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(checkpointStatusFilterProvider);
+    return SizedBox(
+      height: 38,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sp4),
+        physics: const BouncingScrollPhysics(),
+        children: [
+          _FilterChip(
+            label: 'All',
+            isSelected: active == null,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(null),
+          ),
+          _FilterChip(
+            label: 'Active',
+            statusColor: ThemeColors.danger,
+            isSelected: active == ContributionStatusEnum.ACTIVE,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(ContributionStatusEnum.ACTIVE),
+          ),
+          _FilterChip(
+            label: 'Police',
+            statusColor: const Color(0xFFB45309),
+            isSelected: active == ContributionStatusEnum.POLICE_ALERT,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(ContributionStatusEnum.POLICE_ALERT),
+          ),
+          _FilterChip(
+            label: 'Clear',
+            statusColor: const Color(0xFF1F7A4D),
+            isSelected: active == ContributionStatusEnum.INACTIVE,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(ContributionStatusEnum.INACTIVE),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final Color? statusColor;
+
+  const _FilterChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    this.statusColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Selected "All" tab: stone100 bg + textPrimary + border outline
+    // Selected status tab: tinted bg + status color text + tinted border
+    // Unselected: transparent + stone200 border + stone400 text
+    final Color bg;
+    final Color textColor;
+    final Color borderColor;
+    final Color dotColor;
+
+    if (isSelected) {
+      if (statusColor != null) {
+        bg = statusColor!.withValues(alpha: 0.08);
+        textColor = statusColor!;
+        borderColor = statusColor!.withValues(alpha: 0.30);
+        dotColor = statusColor!;
+      } else {
+        bg = ThemeColors.stone100;
+        textColor = ThemeColors.textPrimary;
+        borderColor = ThemeColors.border;
+        dotColor = ThemeColors.stone400;
+      }
+    } else {
+      bg = Colors.transparent;
+      textColor = ThemeColors.stone400;
+      borderColor = ThemeColors.stone200;
+      dotColor = ThemeColors.stone300;
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: ThemeMotion.durFast,
+        curve: ThemeMotion.smooth,
+        margin: const EdgeInsets.only(right: ThemeSpacing.sp2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (statusColor != null) ...[
+              AnimatedContainer(
+                duration: ThemeMotion.durFast,
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 5),
+            ],
+            AnimatedDefaultTextStyle(
+              duration: ThemeMotion.durFast,
+              style: TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: textColor,
+                letterSpacing: -0.1,
+              ),
+              child: Text(label),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

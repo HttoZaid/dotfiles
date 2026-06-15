@@ -1,0 +1,114 @@
+"use client";
+
+import { useTransition } from "react";
+import { ArrowClockwiseIcon, SparkleIcon } from "@phosphor-icons/react";
+import { cn } from "@/lib/utils";
+import type { AnalyticsSummary } from "@/app/(dashboard)/analytics/_lib/analytics-types";
+import { regenerateSchoolSummaryAction } from "../_actions/regenerate-school-summary";
+
+type Props = {
+  schoolId: string;
+  summary: AnalyticsSummary | null;
+  totalAnalysed: number;
+};
+
+export function SchoolAiSummaryClient({ schoolId, summary, totalAnalysed }: Props) {
+  const [pending, startTransition] = useTransition();
+
+  function handleRegenerate() {
+    startTransition(async () => {
+      await regenerateSchoolSummaryAction(schoolId);
+      // Reload to pick up fresh data from server component
+      window.location.reload();
+    });
+  }
+
+  if (!summary) {
+    return (
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+            <SparkleIcon size={14} className="text-primary" weight="fill" />
+          </div>
+          <h2 className="text-[15px] font-semibold tracking-tight">Sage School Insights</h2>
+        </div>
+        <p className="text-[13px] text-muted-foreground leading-relaxed">
+          School-wide AI insights unlock once {3 - totalAnalysed} more{" "}
+          {3 - totalAnalysed === 1 ? "lesson has" : "lessons have"} been analysed
+          ({totalAnalysed}/3).
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+            <SparkleIcon size={14} className="text-primary" weight="fill" />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-semibold tracking-tight">Sage School Insights</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              AI-powered executive summary of systemic teaching trends
+              {summary.stale && (
+                <span className="ml-2 text-amber-600 dark:text-amber-400">· Refreshing…</span>
+              )}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleRegenerate}
+          disabled={pending}
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg border px-3 h-8 text-[12px] font-medium text-muted-foreground",
+            "hover:text-foreground hover:border-border/80 transition-colors shrink-0",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          <ArrowClockwiseIcon
+            size={13}
+            className={cn(pending && "animate-spin")}
+          />
+          {pending ? "Regenerating…" : "Regenerate"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-[var(--chart-1)]" />
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Systemic Strengths
+            </h3>
+          </div>
+          <ul className="divide-y divide-border">
+            {summary.strengths.map((s, i) => (
+              <li key={i} className="py-3 first:pt-0 last:pb-0">
+                <p className="text-[13px] leading-relaxed text-foreground/85">{s}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-[var(--chart-5)]" />
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Growth Opportunities
+            </h3>
+          </div>
+          <ul className="divide-y divide-border">
+            {summary.growthOpportunities.map((g, i) => (
+              <li key={i} className="py-3 first:pt-0 last:pb-0">
+                <p className="text-[13px] leading-relaxed text-foreground/85">{g}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}

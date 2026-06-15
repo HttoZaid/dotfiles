@@ -1,0 +1,99 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import { ActionStateResponse } from "@/types/actions";
+
+export async function regenerateAnalyticsSummary(): Promise<
+  ActionStateResponse<void>
+> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return { success: false, message: "Authentication required" };
+  }
+
+  try {
+    const { data, error: fetchError } = await supabase
+      .from("lessons")
+      .select(`
+        id,
+        lesson_analyses ( id, payload, created_at )
+      `)
+      .order("created_at", {
+        referencedTable: "lesson_analyses",
+        ascending: false,
+      })
+      .limit(1, { referencedTable: "lesson_analyses" });
+
+    if (fetchError || !data) {
+      console.error("regenerateAnalyticsSummary: fetch error", fetchError);
+      return { success: false, message: "Failed to fetch lesson data" };
+    }
+
+    const analysed = data.filter(
+      (l) => l.lesson_analyses && l.lesson_analyses.length > 0,
+    );
+    if (analysed.length < 3) {
+      return { success: false, message: "Not enough analysed lessons (need 3+)" };
+    }
+
+    const analysisIds = analysed.map((l) => l.lesson_analyses[0].id).sort();
+
+    const { isAnalysisPayload } = await import(
+      "@/app/(dashboard)/lessons/[id]/_lib/analysis-types"
+    );
+
+    const validPayloads = analysed
+      .map((l) => l.lesson_analyses[0].payload)
+      .filter((p) => isAnalysisPayload(p));
+
+    if (validPayloads.length < 3) {
+      return { success: false, message: "Not enough valid analysis payloads" };
+    }
+
+    const strengths: string[] = [];
+    const growthOpportunities: string[] = [];
+
+    for (const p of validPayloads) {
+      const ps = p.performance_summary;
+      if (ps) {
+        for (const s of ps.key_strengths ?? []) {
+          strengths.push(s.text);
+        }
+        for (const a of ps.areas_for_improvement ?? []) {
+          growthOpportunities.push(a.text);
+        }
+      }
+    }
+
+    const fingerprint = analysisIds.join("|");
+    const scopeId = user.id;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = supabase.from as any;
+
+    const { error: upsertError } = await db("analytics_summaries")
+      .upsert(
+        {
+          scope_type: "teacher",
+          scope_id: scopeId,
+          strengths: JSON.stringify(strengths.slice(0, 5)),
+          growth_opportunities: JSON.stringify(growthOpportunities.slice(0, 5)),
+          source_lesson_count: analysed.length,
+          source_fingerprint: fingerprint,
+          generated_at: new Date().toISOString(),
+        },
+        { onConflict: "scope_type,scope_id" },
+      );
+
+    if (upsertError) {
+      console.error("regenerateAnalyticsSummary: upsert error", upsertError);
+      return { success: false, message: "Failed to save summary" };
+    }
+
+    return { success: true, message: null };
+  } catch (error) {
+    console.error("regenerateAnalyticsSummary:", error);
+    return { success: false, message: "An unexpected error occurred" };
+  }
+}

@@ -1,0 +1,78 @@
+import 'package:here_sdk/search.dart';
+
+enum SearchField { origin, dest }
+
+class NavSearchState {
+  final List<Suggestion> suggestions;
+  final SearchField activeField;
+  final bool isLoading;
+  final String? error;
+
+  /// Null = use current GPS location as origin.
+  final Suggestion? selectedOrigin;
+  final Suggestion? selectedDest;
+
+  /// True while a routing request is in-flight. Disables all network buttons.
+  final bool isRouting;
+
+  NavSearchState({
+    this.suggestions = const [],
+    this.activeField = SearchField.dest,
+    this.isLoading = false,
+    this.error,
+    this.selectedOrigin,
+    this.selectedDest,
+    this.isRouting = false,
+  });
+
+  bool get canRoute => selectedDest != null;
+
+  NavSearchState copyWith({
+    List<Suggestion>? suggestions,
+    SearchField? activeField,
+    bool? isLoading,
+    String? error,
+    bool? isRouting,
+  }) =>
+      NavSearchState(
+        suggestions: suggestions ?? this.suggestions,
+        activeField: activeField ?? this.activeField,
+        isLoading: isLoading ?? this.isLoading,
+        error: error ?? this.error,
+        selectedOrigin: selectedOrigin,
+        selectedDest: selectedDest,
+        isRouting: isRouting ?? this.isRouting,
+      );
+
+  NavSearchState withClearedSuggestions() => NavSearchState(
+        activeField: activeField,
+        isLoading: false,
+        selectedOrigin: selectedOrigin,
+        selectedDest: selectedDest,
+        isRouting: isRouting,
+      );
+
+  NavSearchState withOrigin(Suggestion? s) => NavSearchState(
+        activeField: activeField,
+        isLoading: false,
+        selectedOrigin: s,
+        selectedDest: selectedDest,
+        isRouting: isRouting,
+      );
+
+  NavSearchState withDest(Suggestion? s) => NavSearchState(
+        activeField: activeField,
+        isLoading: false,
+        selectedOrigin: selectedOrigin,
+        selectedDest: s,
+        isRouting: isRouting,
+      );
+
+  NavSearchState swapped() => NavSearchState(
+        activeField: activeField,
+        isLoading: false,
+        selectedOrigin: selectedDest,
+        selectedDest: selectedOrigin,
+        isRouting: isRouting,
+      );
+}

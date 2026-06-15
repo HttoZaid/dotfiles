@@ -1,0 +1,69 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <sodium.h>
+#include <string>
+#include <vector>
+
+namespace WAWP::Crypto {
+
+struct KeyPair {
+	std::array<uint8_t, 32> pub_key;
+	std::array<uint8_t, 32> priv_key;
+};
+
+KeyPair generate_key_pair();
+
+std::array<uint8_t, 32> hash_sha256(const std::vector<uint8_t>& payload);
+
+std::vector<uint8_t> ecdh(
+    const std::vector<uint8_t>& server_pub_key,
+    const std::vector<uint8_t>& our_priv_key);
+
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> hkdf_sha256(
+    const std::vector<uint8_t>& salt,
+    const std::vector<uint8_t>& ikm,
+    const std::string& info = "");
+
+std::vector<uint8_t> aes_256_gcm_decrypt(
+    const std::vector<uint8_t>& key,
+    const std::array<uint8_t, 12>& iv,
+    const std::vector<uint8_t>& ciphertext,
+    const std::vector<uint8_t>& aad);
+
+std::vector<uint8_t> aes_256_gcm_encrypt(
+    const std::vector<uint8_t>& key,
+    const std::array<uint8_t, 12>& iv,
+    const std::vector<uint8_t>& plaintext,
+    const std::vector<uint8_t>& aad);
+
+struct IdentityKeyPair {
+	std::array<uint8_t, 32> pub_key; // Curve25519 public
+	std::array<uint8_t, 32> priv_key; // Curve25519 private
+	std::array<uint8_t, 64> sign_key; // Ed25519 private (Used ONLY for signing)
+};
+
+struct SignedPreKey {
+	uint32_t id;
+	KeyPair key_pair; // The Curve25519 DH key
+	std::array<uint8_t, 64> signature; // The Ed25519 signature
+};
+
+bool ed25519_verify(
+    const std::array<uint8_t, 32>& pub_key,
+    const uint8_t* message, size_t message_len,
+    const uint8_t* signature);
+
+// XEdDSA verify: pub_key is a Curve25519 key (little-endian).
+// Converts to Ed25519 form (y = (u-1)/(u+1) mod p, sign=0) then verifies.
+bool xeddsa_verify(
+    const std::array<uint8_t, 32>& curve25519_pub,
+    const uint8_t* message, size_t message_len,
+    const uint8_t* signature);
+
+IdentityKeyPair generate_identity_key_pair();
+
+SignedPreKey generate_signed_pre_key(const IdentityKeyPair& identity, uint32_t pre_key_id);
+
+}

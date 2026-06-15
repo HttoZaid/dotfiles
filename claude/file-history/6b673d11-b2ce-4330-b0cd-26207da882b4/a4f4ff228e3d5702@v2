@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Your lesson analysis is ready</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f5f5f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+<tr>
+  <td align="center" style="padding:48px 20px 64px">
+
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:520px">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#ffffff;padding:28px 40px 24px;border-radius:16px 16px 0 0;border:1px solid #e7e5e4;border-bottom:none">
+          <table cellpadding="0" cellspacing="0" border="0" role="presentation">
+            <tr>
+              <td style="font-size:15px;font-weight:700;color:#1c1917;letter-spacing:-0.02em">Learnalyze</td>
+              <td style="padding-left:7px;vertical-align:middle;padding-top:1px">
+                <div style="width:6px;height:6px;background:#44c5a0;border-radius:50%;display:inline-block"></div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Teal accent bar -->
+      <tr>
+        <td style="background:#44c5a0;height:3px;border-left:1px solid #38b48f;border-right:1px solid #38b48f"></td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="background:#ffffff;padding:36px 40px 32px;border:1px solid #e7e5e4;border-top:none;border-bottom:none">
+
+          <!-- Success badge -->
+          <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="margin:0 0 28px">
+            <tr>
+              <td style="background:#f0fdf9;border:1px solid #ccfbee;border-radius:8px;padding:10px 16px">
+                <table cellpadding="0" cellspacing="0" border="0" role="presentation">
+                  <tr>
+                    <td style="padding-right:10px;vertical-align:middle">
+                      <div style="width:18px;height:18px;background:#44c5a0;border-radius:50%;text-align:center;line-height:18px;font-size:11px;color:#0c3028;font-weight:700">&#10003;</div>
+                    </td>
+                    <td style="font-size:13px;font-weight:600;color:#0c6b46;vertical-align:middle">Analysis complete</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0 0 8px;font-size:24px;font-weight:700;color:#1c1917;letter-spacing:-0.03em;line-height:1.2">Your results are in</p>
+
+          <p style="margin:0 0 24px;font-size:15px;color:#44403c;line-height:1.65">
+            Hi <strong style="color:#1c1917">{{teacher_name}}</strong>, your lesson has been analysed across all six teaching dimensions. Head over to see your full feedback and scores.
+          </p>
+
+          <!-- Lesson card -->
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background:#fafaf9;border:1px solid #e7e5e4;border-radius:10px;margin:0 0 28px;overflow:hidden">
+            <tr>
+              <td style="padding:4px 0 0;background:#44c5a0;border-radius:10px 10px 0 0;height:4px"></td>
+            </tr>
+            <tr>
+              <td style="padding:16px 20px">
+                <p style="margin:0 0 3px;font-size:11px;font-weight:600;color:#a8a29e;text-transform:uppercase;letter-spacing:0.07em">Lesson</p>
+                <p style="margin:0;font-size:15px;font-weight:600;color:#1c1917;letter-spacing:-0.01em">{{lesson_title}}</p>
+              </td>
+            </tr>
+          </table>
+
+          <!-- CTA -->
+          <table cellpadding="0" cellspacing="0" border="0" role="presentation">
+            <tr>
+              <td style="background:#44c5a0;border-radius:10px">
+                <a href="{{lesson_link}}" style="display:inline-block;padding:14px 32px;font-size:14px;font-weight:600;color:#0c3028;text-decoration:none;letter-spacing:-0.01em">View analysis &rarr;</a>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:20px 0 0;font-size:13px;color:#a8a29e;line-height:1.6">Keep going &mdash; consistent reflection is how great teachers get better.</p>
+
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#fafaf9;padding:20px 40px;border-radius:0 0 16px 16px;border:1px solid #e7e5e4;border-top:none">
+          <p style="margin:0;font-size:12px;color:#a8a29e;text-align:center;line-height:1.8">
+            Learnalyze &mdash; AI-powered teaching insights<br>
+            <a href="https://learnalyze.app" style="color:#78716c;text-decoration:underline">learnalyze.app</a>
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td>
+</tr>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,189 @@
+package expo.modules.heremaps
+
+import com.here.sdk.core.GeoCoordinates
+import expo.modules.kotlin.exception.CodedException
+import expo.modules.kotlin.functions.Coroutine
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
+import expo.modules.kotlin.types.Enumerable
+
+class MapCenter : Record {
+    @Field val lat: Double = 0.0
+    @Field val lng: Double = 0.0
+    @Field val animated: Boolean = false
+}
+
+class CameraPosition : Record {
+    @Field val lat: Double = 0.0
+    @Field val lng: Double = 0.0
+    @Field val animated: Boolean = false
+    @Field val bearing: Double? = null
+    @Field val tilt: Double? = null
+    @Field val distanceMeters: Double? = null
+}
+
+class LatLng : Record {
+    @Field val lat: Double = 0.0
+    @Field val lng: Double = 0.0
+}
+
+class SearchArea : Record {
+    @Field val lat: Double = 0.0
+    @Field val lng: Double = 0.0
+}
+
+enum class TransportMode(val value: String) : Enumerable {
+    car("car"),
+    truck("truck"),
+    pedestrian("pedestrian"),
+    bicycle("bicycle"),
+    scooter("scooter"),
+    taxi("taxi"),
+    bus("bus")
+}
+
+class HereMapsModule : Module() {
+    override fun definition() = ModuleDefinition {
+        Name("HereMaps")
+
+        View(HereMapsView::class) {
+            Events(
+                "onMapError",
+                "onGuidanceProgress",
+                "onManeuver",
+                "onOffRoute",
+                "onArrived",
+                "onNavigableLocation"
+            )
+
+            Prop("center") { view: HereMapsView, center: MapCenter ->
+                view.setMapCenter(center.lat, center.lng, center.animated)
+            }
+            Prop("bearing") { view: HereMapsView, bearing: Double ->
+                view.setBearing(bearing)
+            }
+            Prop("tilt") { view: HereMapsView, tilt: Double ->
+                view.setTilt(tilt)
+            }
+
+            AsyncFunction("setMapScheme") { view: HereMapsView, scheme: String ->
+                when (val r = view.controls.setScheme(scheme)) {
+                    is MapResult.Ok -> {}
+                    is MapResult.Err -> throw CodedException(r.code, r.message, null)
+                }
+            }
+            AsyncFunction("enableFeatures") { view: HereMapsView, features: List<String> ->
+                when (val r = view.controls.enableFeatures(features)) {
+                    is MapResult.Ok -> {}
+                    is MapResult.Err -> throw CodedException(r.code, r.message, null)
+                }
+            }
+            AsyncFunction("disableFeatures") { view: HereMapsView, features: List<String> ->
+                when (val r = view.controls.disableFeatures(features)) {
+                    is MapResult.Ok -> {}
+                    is MapResult.Err -> throw CodedException(r.code, r.message, null)
+                }
+            }
+            AsyncFunction("setCameraPosition") { view: HereMapsView, pos: CameraPosition ->
+                view.setMapCenter(pos.lat, pos.lng, pos.animated, pos.distanceMeters)
+                pos.bearing?.let { view.setBearing(it) }
+                pos.tilt?.let { view.setTilt(it) }
+            }
+
+            AsyncFunction("suggestPlaces") Coroutine { view: HereMapsView, query: String, near: SearchArea ->
+                val nearCoords = GeoCoordinates(near.lat, near.lng)
+                when (val result = view.searchManager.suggest(query, nearCoords)) {
+                    is HereResult.Ok -> result.value
+                    is HereResult.Err -> throw CodedException(result.code, result.message, result.cause)
+                }
+            }
+
+            AsyncFunction("resolvePlace") Coroutine { view: HereMapsView, placeId: String ->
+                when (val result = view.searchManager.resolvePlace(placeId)) {
+                    is HereResult.Ok -> result.value
+                    is HereResult.Err -> throw CodedException(result.code, result.message, result.cause)
+                }
+            }
+
+            AsyncFunction("showRoute") Coroutine { view: HereMapsView, from: LatLng, to: LatLng, mode: TransportMode? ->
+                val transportMode = when (mode) {
+                    TransportMode.car -> HereTransportMode.CAR
+                    TransportMode.truck -> HereTransportMode.TRUCK
+                    TransportMode.pedestrian -> HereTransportMode.PEDESTRIAN
+                    TransportMode.bicycle -> HereTransportMode.BICYCLE
+                    TransportMode.scooter -> HereTransportMode.SCOOTER
+                    TransportMode.taxi -> HereTransportMode.TAXI
+                    TransportMode.bus -> HereTransportMode.BUS
+                    null -> HereTransportMode.CAR
+                }
+                val fromCoords = GeoCoordinates(from.lat, from.lng)
+                val toCoords = GeoCoordinates(to.lat, to.lng)
+                when (val result = view.routeManager.showRoute(fromCoords, toCoords, transportMode)) {
+                    is HereResult.Ok -> result.value
+                    is HereResult.Err -> throw CodedException(result.code, result.message, result.cause)
+                }
+            }
+
+            AsyncFunction("clearRoute") { view: HereMapsView ->
+                view.routeManager.clearRoute()
+            }
+
+            AsyncFunction("compareRoutes") Coroutine { view: HereMapsView, from: LatLng, to: LatLng, modes: List<TransportMode> ->
+                val hereModes = modes.map { mode ->
+                    when (mode) {
+                        TransportMode.car -> HereTransportMode.CAR
+                        TransportMode.truck -> HereTransportMode.TRUCK
+                        TransportMode.pedestrian -> HereTransportMode.PEDESTRIAN
+                        TransportMode.bicycle -> HereTransportMode.BICYCLE
+                        TransportMode.scooter -> HereTransportMode.SCOOTER
+                        TransportMode.taxi -> HereTransportMode.TAXI
+                        TransportMode.bus -> HereTransportMode.BUS
+                    }
+                }
+                val fromCoords = GeoCoordinates(from.lat, from.lng)
+                val toCoords = GeoCoordinates(to.lat, to.lng)
+                when (val result = view.routeManager.compareRoutes(fromCoords, toCoords, hereModes)) {
+                    is HereResult.Ok -> result.value
+                    is HereResult.Err -> throw CodedException(result.code, result.message, result.cause)
+                }
+            }
+
+            AsyncFunction("startGuidance") Coroutine { view: HereMapsView, from: LatLng, to: LatLng, mode: TransportMode? ->
+                val transportMode = when (mode) {
+                    TransportMode.car -> HereTransportMode.CAR
+                    TransportMode.truck -> HereTransportMode.TRUCK
+                    TransportMode.pedestrian -> HereTransportMode.PEDESTRIAN
+                    TransportMode.bicycle -> HereTransportMode.BICYCLE
+                    TransportMode.scooter -> HereTransportMode.SCOOTER
+                    TransportMode.taxi -> HereTransportMode.TAXI
+                    TransportMode.bus -> HereTransportMode.BUS
+                    null -> HereTransportMode.CAR
+                }
+                val fromCoords = GeoCoordinates(from.lat, from.lng)
+                val toCoords = GeoCoordinates(to.lat, to.lng)
+                when (val result = view.routeManager.calculateRoute(fromCoords, toCoords, transportMode)) {
+                    is HereResult.Ok -> {
+                        view.routeManager.clearRoute()
+                        view.guidanceManager.startGuidance(result.value)
+                        routeSummary(result.value)
+                    }
+                    is HereResult.Err -> throw CodedException(result.code, result.message, result.cause)
+                }
+            }
+
+            AsyncFunction("stopGuidance") { view: HereMapsView ->
+                view.guidanceManager.stopGuidance()
+            }
+
+            AsyncFunction("updateUserLocation") { view: HereMapsView, lat: Double, lng: Double, bearing: Double? ->
+                view.updateUserLocation(lat, lng, bearing)
+            }
+
+            OnViewDestroys { view: HereMapsView ->
+                view.onDestroy()
+            }
+        }
+    }
+}

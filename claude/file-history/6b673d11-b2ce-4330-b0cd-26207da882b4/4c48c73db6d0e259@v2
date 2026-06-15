@@ -1,0 +1,30 @@
+import { bodyText, ctaButton, emailLayout, mutedText } from "../_lib/layout";
+
+export type PasswordResetEmailArgs = {
+  to: string;
+  resetLink: string;
+};
+
+export function buildPasswordResetEmail(args: PasswordResetEmailArgs): {
+  subject: string;
+  html: string;
+} {
+  const { resetLink } = args;
+
+  const content = [
+    bodyText(`Hi,`),
+    bodyText(
+      `We received a request to reset the password for your Learnalyze account. Click the button below to choose a new password.`,
+    ),
+    ctaButton(resetLink, "Reset password"),
+    mutedText(
+      `If you didn&rsquo;t request a password reset, you can safely ignore this email &mdash; your password won&rsquo;t change.`,
+    ),
+    mutedText(`This link expires in 1&nbsp;hour.`),
+  ].join("\n");
+
+  return {
+    subject: "Reset your Learnalyze password",
+    html: emailLayout("Reset your password", content),
+  };
+}

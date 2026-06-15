@@ -1,0 +1,42 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/routing.dart' show Route;
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/navigation_phase.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/nav_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/routing/route_checkpoint_filter.dart';
+
+export 'package:ukcheckpoints_app/features/navigation/routing/route_checkpoint_filter.dart'
+    show RouteCheckpointResult;
+
+/// Extracts the active [Route] from the nav phase so [routeCheckpointsProvider]
+/// only re-computes when the route object itself changes — not on every
+/// TripOverview→ActiveDrive transition or camera-state update.
+final _activeRouteProvider = Provider<Route?>((ref) {
+  return switch (ref.watch(navStateNotifierProvider)) {
+    TripOverview(:final route) => route,
+    ActiveDrive(:final route) => route,
+    _ => null,
+  };
+});
+
+/// Filters all known checkpoints to those within 300 m of the active route
+/// polyline, sorted by distance along the route.
+///
+/// Uses a plain (non-autoDispose) provider so the result is cached across
+/// sheet collapses and re-expands — the isolate only re-runs when the route
+/// or checkpoint list actually changes.
+final routeCheckpointsProvider =
+    FutureProvider<List<RouteCheckpointResult>>((ref) async {
+  final route = ref.watch(_activeRouteProvider);
+  if (route == null) return [];
+
+  final checkpoints =
+      ref.watch(checkpointNotifierProvider).value?.checkpoints ?? [];
+  if (checkpoints.isEmpty) return [];
+
+  final vertices = route.geometry.vertices
+      .map((c) => (c.latitude, c.longitude))
+      .toList();
+
+  return filterRouteCheckpoints(vertices, checkpoints);
+});

@@ -1,0 +1,336 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/navigation.dart';
+import 'package:here_sdk/routing.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+
+import '../models/navigation_phase.dart';
+import '../routing/uk_route_options.dart';
+import '../search/nav_search_notifier.dart';
+import '../utils/strings.dart';
+import 'drive_progress_provider.dart';
+import 'sheet_state_provider.dart';
+
+part 'nav_state_provider.g.dart';
+
+@Riverpod(keepAlive: true)
+class NavStateNotifier extends _$NavStateNotifier {
+  VisualNavigator? _navigator;
+  RoutingEngine? _routingEngine;
+  Timer? _recenterTimer;
+  Timer? _arrivedTimer;
+  StreamSubscription<Position>? _locationSub;
+  LocationSimulator? _simulator;
+  DateTime? _lastLocTime;
+  static const bool _kNavDebug = true;
+
+  @override
+  NavigationPhase build() {
+    _routingEngine = RoutingEngine();
+    ref.onDispose(_teardown);
+    return const Idle();
+  }
+
+  // ── Route calculation ─────────────────────────────────────────────────────
+
+  void calculateRoute({
+    required GeoCoordinates origin,
+    required GeoCoordinates dest,
+  }) {
+    final engine = _routingEngine;
+    if (engine == null) return;
+
+    final waypoints = [Waypoint(origin), Waypoint(dest)];
+    final options = buildUkCarOptions();
+
+    engine.calculateRouteWithRoutingOptions(waypoints, options, (
+      RoutingError? err,
+      List<Route>? routes,
+    ) {
+      ref.read(navSearchNotifierProvider.notifier).unlockRouting();
+      if (err != null || routes == null || routes.isEmpty) {
+        ref
+            .read(navSearchNotifierProvider.notifier)
+            .setError(NavStrings.routeError);
+        return;
+      }
+      final route = routes.first;
+      final searchState = ref.read(navSearchNotifierProvider);
+      state = TripOverview(
+        route: route,
+        originTitle:
+            searchState.selectedOrigin?.title ?? NavStrings.myLocationLabel,
+        destTitle: searchState.selectedDest?.title ?? '',
+      );
+      ref.read(sheetStateNotifierProvider.notifier).showTripOverview();
+      // Hide all global checkpoint markers — only route checkpoints shown
+      // from here until trip is closed or drive ends.
+      ref.read(mapControllerProvider.notifier).hideCheckpoints();
+      unawaited(ref.read(mapControllerProvider.notifier).showRoute(route));
+    });
+  }
+
+  // ── Drive lifecycle ───────────────────────────────────────────────────────
+
+  void startDrive(Route route) {
+    final mapController = ref.read(mapControllerProvider);
+    if (mapController == null) return;
+
+    // Snapshot origin/dest names before teardown clears any state.
+    final overview = state;
+    final originTitle = overview is TripOverview ? overview.originTitle : '';
+    final destTitle = overview is TripOverview ? overview.destTitle : '';
+
+    _teardown();
+
+    final nav = VisualNavigator();
+    _navigator = nav;
+
+    nav.startRendering(mapController);
+    applyUkUnitsToNavigator(nav);
+
+    nav.routeDeviationListener = _DeviationAdapter(onDeviation);
+    nav.destinationReachedListener = _ArrivalAdapter(onArrival);
+    nav.routeProgressListener = _ProgressAdapter(onProgress);
+
+    nav.route = route;
+    nav.cameraBehavior = DynamicCameraBehavior();
+
+    // if (kReleaseMode) {
+    // Physical device: feed real GPS ticks to the navigator.
+    LocationSettings locationSettings;
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      locationSettings = AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation, // Highest priority
+        distanceFilter: 0,
+        intervalDuration: const Duration(seconds: 1), // Force a 1Hz pulse
+      );
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      locationSettings = AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        activityType:
+            ActivityType.automotiveNavigation, // Tells iOS NOT to throttle
+        distanceFilter: 0,
+      );
+    } else {
+      locationSettings = const LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+      );
+    }
+
+    // Physical device: feed 1Hz real GPS ticks to the navigator.
+    _locationSub = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    ).listen(_forwardLocation);
+    // } else {
+    //   // Emulator / dev: use the SDK simulator so the navigator receives
+    //   // complete location objects (coords + bearing + speed) and turn-by-turn
+    //   // actually progresses along the route.
+    //   _simulator = LocationSimulator.withRoute(route, LocationSimulatorOptions());
+    //   _simulator!.listener = nav;
+    //   _simulator!.start();
+    // }
+
+    // Hide global checkpoint markers — only route checkpoints shown during drive.
+    ref.read(mapControllerProvider.notifier).hideCheckpoints();
+
+    // Reset progress so stale data never shows for a new drive.
+    ref.read(driveProgressProvider.notifier).state = null;
+
+    // Clear the polyline and origin marker — the dest marker stays so the
+    // driver can see their target on the map during the drive.
+    ref.read(mapControllerProvider.notifier).clearRoutePolylineAndOrigin();
+    ref.read(sheetStateNotifierProvider.notifier).peek();
+
+    state = ActiveDrive(
+      route: route,
+      originTitle: originTitle,
+      destTitle: destTitle,
+    );
+  }
+
+  void closeTrip() {
+    ref.read(mapControllerProvider.notifier)
+      ..clearRoute()
+      ..clearRouteCheckpoints()
+      ..showCheckpoints();
+    ref.read(navSearchNotifierProvider.notifier).reset();
+    ref.read(sheetStateNotifierProvider.notifier).peek();
+    state = const Idle();
+  }
+
+  void stopDrive() {
+    _teardown();
+    ref.read(driveProgressProvider.notifier).state = null;
+    ref.read(mapControllerProvider.notifier)
+      ..clearRouteCheckpoints()
+      ..showCheckpoints()
+      ..clearRoute();
+    ref.read(sheetStateNotifierProvider.notifier).peek();
+    state = const Idle();
+  }
+
+  // ── Camera ownership ──────────────────────────────────────────────────────
+
+  void recenter() {
+    final nav = _navigator;
+    final current = state;
+    if (nav == null || current is! ActiveDrive) return;
+    _recenterTimer?.cancel();
+    _recenterTimer = null;
+    nav.cameraBehavior = DynamicCameraBehavior();
+    state = current.copyWith(camera: CameraOwnership.following);
+  }
+
+  void onPan() {
+    final nav = _navigator;
+    final current = state;
+    if (nav == null || current is! ActiveDrive) return;
+
+    if (current.camera == CameraOwnership.free) {
+      // Already free — just reset the idle timer so the user gets a fresh 10s.
+      _resetRecenterTimer();
+      return;
+    }
+
+    nav.cameraBehavior = null;
+    state = current.copyWith(camera: CameraOwnership.free);
+    _resetRecenterTimer();
+  }
+
+  void _resetRecenterTimer() {
+    _recenterTimer?.cancel();
+    _recenterTimer = Timer(const Duration(seconds: 10), recenter);
+  }
+
+  // ── Navigator event handlers ──────────────────────────────────────────────
+
+  void onDeviation() {
+    final current = state;
+    if (current is! ActiveDrive) return;
+    state = current.copyWith(isRerouting: true);
+    // Silent reroute wired in the reroute edge-case task.
+  }
+
+  void onArrival() {
+    _teardown();
+    ref.read(driveProgressProvider.notifier).state = null;
+    ref.read(mapControllerProvider.notifier)
+      ..clearRouteCheckpoints()
+      ..showCheckpoints()
+      ..clearRoute();
+    ref.read(sheetStateNotifierProvider.notifier).peek();
+
+    final destName =
+        ref.read(navSearchNotifierProvider).selectedDest?.title ?? '';
+    state = Arrived(destName: destName);
+
+    _arrivedTimer = Timer(const Duration(seconds: 4), () {
+      _arrivedTimer = null;
+      ref.read(navSearchNotifierProvider.notifier).reset();
+      state = const Idle();
+    });
+  }
+
+  void onProgress(RouteProgress progress) {
+    ref.read(driveProgressProvider.notifier).state = progress;
+  }
+
+  // ── Private ───────────────────────────────────────────────────────────────
+
+  void _forwardLocation(Position pos) {
+    final nav = _navigator;
+    if (nav == null) {
+      if (_kNavDebug) debugPrint("[NAV] navigator null — skip");
+      return;
+    }
+
+    // HERE's map-matcher + interpolator REQUIRE a strictly increasing time.
+    // Geolocator can emit duplicate/regressed timestamps on some Android devices,
+    // which starves the interpolator and shows up as choppy/laggy marker motion.
+    var ts = pos.timestamp.toUtc();
+    final last = _lastLocTime;
+    if (last != null && !ts.isAfter(last)) {
+      ts = last.add(const Duration(milliseconds: 1));
+    }
+    _lastLocTime = ts;
+
+    final location =
+        Location.withCoordinates(GeoCoordinates(pos.latitude, pos.longitude))
+          ..time = ts
+          // Only pass real heading/speed. Geolocator returns 0.0/-1 for "unknown"
+          // depending on platform; feeding a fake 0° bearing snaps the marker north.
+          ..bearingInDegrees = pos.heading >= 0 ? pos.heading : null
+          ..speedInMetersPerSecond = pos.speed >= 0 ? pos.speed : null
+          ..horizontalAccuracyInMeters = pos.accuracy;
+
+    nav.onLocationUpdated(location);
+
+    if (_kNavDebug) {
+      debugPrint(
+        "[NAV] ${pos.latitude},${pos.longitude} "
+        "hdg=${location.bearingInDegrees} spd=${location.speedInMetersPerSecond} t=$ts",
+      );
+    }
+  }
+
+  /// Delegates to the live VisualNavigator so callers get map-matched,
+  /// route-synced maneuver data instead of stale Route object data.
+  Maneuver? getManeuver(int index) => _navigator?.getManeuver(index);
+
+  void _teardown() {
+    _recenterTimer?.cancel();
+    _recenterTimer = null;
+
+    _arrivedTimer?.cancel();
+    _arrivedTimer = null;
+
+    _locationSub?.cancel();
+    _locationSub = null;
+
+    _simulator?.stop();
+    _simulator = null;
+
+    final nav = _navigator;
+    if (nav == null) return;
+    nav.routeDeviationListener = null;
+    nav.destinationReachedListener = null;
+    nav.routeProgressListener = null;
+    nav.cameraBehavior = null;
+    nav.route = null;
+    nav.stopRendering();
+    _navigator = null;
+  }
+}
+
+// ── Private listener adapters ──────────────────────────────────────────────
+
+class _DeviationAdapter implements RouteDeviationListener {
+  final void Function() _callback;
+  const _DeviationAdapter(this._callback);
+
+  @override
+  void onRouteDeviation(RouteDeviation _) => _callback();
+}
+
+class _ArrivalAdapter implements DestinationReachedListener {
+  final void Function() _callback;
+  const _ArrivalAdapter(this._callback);
+
+  @override
+  void onDestinationReached() => _callback();
+}
+
+class _ProgressAdapter implements RouteProgressListener {
+  final void Function(RouteProgress) _callback;
+  const _ProgressAdapter(this._callback);
+
+  @override
+  void onRouteProgressUpdated(RouteProgress progress) => _callback(progress);
+}

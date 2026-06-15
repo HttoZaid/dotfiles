@@ -1,0 +1,155 @@
+import 'dart:async';
+
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/checkpoint_action_sheet_widget.dart';
+
+class CheckpointCard extends StatelessWidget {
+  final Checkpoint checkpoint;
+
+  const CheckpointCard({required this.checkpoint, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+
+    final latestStatus =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.status
+            : null;
+
+    return RepaintBoundary(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: ThemeSpacing.sp3),
+        decoration: BoxDecoration(
+          color: ThemeColors.bgRaised,
+          borderRadius: ThemeRadius.brLg,
+          border: Border.all(color: ThemeColors.border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x03000000),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: ThemeRadius.brLg,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                unawaited(showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder:
+                      (context) =>
+                          CheckpointActionSheet(checkpoint: checkpoint),
+                ));
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(ThemeSpacing.sp4),
+                child: Row(
+                  children: [
+                    _StatusIndicator(status: latestStatus),
+                    const SizedBox(width: ThemeSpacing.sp4),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            checkpoint.name,
+                            style: textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: ThemeColors.textPrimary,
+                              fontSize: 15,
+                              letterSpacing: -0.3,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${checkpoint.latitude.toStringAsFixed(4)}, ${checkpoint.longitude.toStringAsFixed(4)}',
+                            style: const TextStyle(
+                              fontFamily: 'Monospace',
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: ThemeColors.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: ThemeSpacing.sp3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          DateFormat(
+                            'HH:mm',
+                          ).format(checkpoint.createdAt.toLocal()),
+                          style: textTheme.labelSmall?.copyWith(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: ThemeColors.textTertiary,
+                          ),
+                        ),
+                        const SizedBox(width: ThemeSpacing.sp2),
+                        const Icon(
+                          CupertinoIcons.chevron_right,
+                          size: 12,
+                          color: ThemeColors.borderStrong,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusIndicator extends StatelessWidget {
+  final ContributionStatusEnum? status;
+
+  const _StatusIndicator({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, IconData icon) = switch (status) {
+      ContributionStatusEnum.ACTIVE => (
+        ThemeColors.danger,
+        CupertinoIcons.dot_radiowaves_right,
+      ),
+      ContributionStatusEnum.INACTIVE => (
+        const Color(0xFF34C759),
+        CupertinoIcons.checkmark_shield_fill,
+      ),
+      ContributionStatusEnum.POLICE_ALERT => (
+        const Color(0xFFFF9500),
+        CupertinoIcons.exclamationmark_triangle_fill,
+      ),
+      _ => (ThemeColors.stone300, CupertinoIcons.question_circle_fill),
+    };
+
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        shape: BoxShape.circle,
+      ),
+      child: Center(child: Icon(icon, color: color, size: 18)),
+    );
+  }
+}

@@ -1,0 +1,126 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+
+class CheckpointFilterBar extends ConsumerWidget {
+  const CheckpointFilterBar({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(checkpointStatusFilterProvider);
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sp4),
+        physics: const BouncingScrollPhysics(),
+        children: [
+          _Chip(
+            label: 'All',
+            isSelected: active == null,
+            onTap: () =>
+                ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(null),
+          ),
+          _Chip(
+            label: 'Active',
+            dotColor: ThemeColors.danger,
+            isSelected: active == ContributionStatusEnum.ACTIVE,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(ContributionStatusEnum.ACTIVE),
+          ),
+          _Chip(
+            label: 'Police',
+            dotColor: const Color(0xFFB45309),
+            isSelected: active == ContributionStatusEnum.POLICE_ALERT,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(ContributionStatusEnum.POLICE_ALERT),
+          ),
+          _Chip(
+            label: 'Clear',
+            dotColor: const Color(0xFF1F7A4D),
+            isSelected: active == ContributionStatusEnum.INACTIVE,
+            onTap: () => ref
+                .read(checkpointStatusFilterProvider.notifier)
+                .setFilter(ContributionStatusEnum.INACTIVE),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final Color? dotColor;
+
+  const _Chip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    this.dotColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = dotColor ?? ThemeColors.accent;
+    return Padding(
+      padding: const EdgeInsets.only(right: ThemeSpacing.sp2),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: ThemeMotion.durBase,
+          curve: ThemeMotion.smooth,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color:
+                isSelected
+                    ? color.withValues(alpha: 0.08)
+                    : ThemeColors.bgSubtle,
+            borderRadius: ThemeRadius.brFull,
+            border: Border.all(
+              color:
+                  isSelected
+                      ? color.withValues(alpha: 0.4)
+                      : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (dotColor != null) ...[
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: isSelected ? color : ThemeColors.stone400,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontFamily: ThemeFonts.ui,
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? color : ThemeColors.textSecondary,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

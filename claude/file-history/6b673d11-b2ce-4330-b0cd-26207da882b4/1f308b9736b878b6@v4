@@ -1,0 +1,322 @@
+import "server-only";
+
+import {
+  isAnalysisPayload,
+  normalizeStatus,
+  type AnalysisPayload,
+} from "@/app/(dashboard)/lessons/[id]/_lib/analysis-types";
+import {
+  DIMENSION_KEY_ORDER,
+  DIMENSION_LABELS,
+  type AnalyticsData,
+  type Classification,
+  type DimensionKey,
+} from "@/app/(dashboard)/analytics/_lib/analytics-types";
+import { createClient } from "@/lib/supabase/server";
+
+export type TeacherStat = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  role: string;
+  department: string | null;
+  totalLessons: number;
+  analysedLessons: number;
+  averageScore: number | null;
+  rating: Classification | null;
+  lowestDimension: string | null;
+  lastAnalysedAt: string | null;
+};
+
+export type SchoolAnalyticsData = {
+  aggregate: AnalyticsData;
+  teachers: TeacherStat[];
+  totalTeacherCount: number;
+  activeTeacherCount: number;
+  excellentLessonCount: number;
+  isEmpty: boolean;
+};
+
+const KEY_MAP: Record<string, DimensionKey> = {
+  lesson_structure: "lesson_structure",
+  behaviour_management: "behaviour_management",
+  clarity: "clarity",
+  formative_assessment: "formative_assessment",
+  engagement: "engagement",
+  technology: "technology",
+};
+
+function toPct(v: number): number {
+  if (v > 1) return v;
+  return v * 100;
+}
+
+function avg(arr: number[]) {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+}
+
+function ratingFromScore(score: number | null): Classification | null {
+  if (score === null) return null;
+  if (score >= 85) return "excellent";
+  if (score >= 65) return "good";
+  if (score >= 39) return "satisfactory";
+  return "needs_improvement";
+}
+
+function emptyAggregate(): AnalyticsData {
+  return {
+    kpis: {
+      totalLessons: 0,
+      averageScore: 0,
+      topRatedCount: 0,
+      primaryFocus: { key: "clarity", label: "Clarity", score: 0 },
+    },
+    dimensions: DIMENSION_KEY_ORDER.map((key) => ({
+      key,
+      label: DIMENSION_LABELS[key],
+      score: 0,
+    })),
+    overallScore: 0,
+    distribution: [],
+    trend: [],
+    isEmpty: true,
+    hasSummaryData: false,
+  };
+}
+
+export async function getSchoolAnalytics(
+  schoolId: string,
+): Promise<SchoolAnalyticsData | null> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return null;
+
+  const [profilesRes, lessonsRes, departmentsRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, display_name, email, avatar_url, role, department_id")
+      .eq("school_id", schoolId)
+      .in("role", ["teacher", "head_of_department"]),
+
+    supabase
+      .from("lessons")
+      .select(
+        "id, title, created_at, uploaded_by, lesson_analyses(id, payload, created_at)",
+      )
+      .eq("school_id", schoolId)
+      .order("created_at", { referencedTable: "lesson_analyses", ascending: false })
+      .limit(1, { referencedTable: "lesson_analyses" }),
+
+    supabase
+      .from("departments")
+      .select("id, name")
+      .eq("school_id", schoolId),
+  ]);
+
+  if (lessonsRes.error) {
+    console.error("getSchoolAnalytics: lessons fetch failed", {
+      schoolId,
+      error: lessonsRes.error,
+    });
+    return null;
+  }
+
+  const staffProfiles = profilesRes.data ?? [];
+  const allLessons = lessonsRes.data ?? [];
+  const deptMap = new Map(
+    (departmentsRes.data ?? []).map((d) => [d.id, d.name]),
+  );
+
+  type ParsedLesson = {
+    lessonId: string;
+    uploadedBy: string;
+    title: string;
+    date: string;
+    payload: AnalysisPayload;
+    analysedAt: string;
+  };
+
+  const parsed: ParsedLesson[] = [];
+  for (const lesson of allLessons) {
+    const analysis = lesson.lesson_analyses?.[0];
+    if (!analysis?.payload) continue;
+    const raw = analysis.payload;
+    if (isAnalysisPayload(raw)) {
+      parsed.push({
+        lessonId: lesson.id,
+        uploadedBy: lesson.uploaded_by,
+        title: lesson.title ?? "Untitled",
+        date: lesson.created_at ?? new Date().toISOString(),
+        payload: raw,
+        analysedAt: analysis.created_at,
+      });
+    }
+  }
+
+  // --- Aggregate analytics ---------------------------------------------------
+  let aggregate: AnalyticsData;
+  let excellentLessonCount = 0;
+
+  if (parsed.length === 0) {
+    aggregate = emptyAggregate();
+  } else {
+    const scores = parsed.map((p) => toPct(p.payload.overall_score));
+    const averageScore = Math.round(
+      scores.reduce((a, b) => a + b, 0) / scores.length,
+    );
+
+    const classCounts: Record<Classification, number> = {
+      excellent: 0,
+      good: 0,
+      satisfactory: 0,
+      needs_improvement: 0,
+    };
+    for (const p of parsed) {
+      classCounts[normalizeStatus(p.payload.classification)]++;
+    }
+    excellentLessonCount = classCounts.excellent;
+    const topRatedCount = classCounts.excellent + classCounts.good;
+
+    const dimScores: Record<DimensionKey, number[]> = {} as Record<DimensionKey, number[]>;
+    for (const key of DIMENSION_KEY_ORDER) dimScores[key] = [];
+    for (const p of parsed) {
+      for (const m of p.payload.metrics) {
+        const k = KEY_MAP[m.name];
+        if (k) dimScores[k].push(toPct(m.score));
+      }
+    }
+
+    const dimensions = DIMENSION_KEY_ORDER.map((key) => ({
+      key,
+      label: DIMENSION_LABELS[key],
+      score: Math.round(toPct(avg(dimScores[key]) ?? 0)),
+    }));
+
+    const primaryFocus = dimensions.reduce((min, d) =>
+      d.score < min.score ? d : min,
+    );
+
+    const trend = parsed
+      .map((p) => ({
+        lessonId: p.lessonId,
+        title: p.title,
+        date: p.date,
+        score: toPct(p.payload.overall_score),
+      }))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    aggregate = {
+      kpis: {
+        totalLessons: parsed.length,
+        averageScore,
+        topRatedCount,
+        primaryFocus: {
+          key: primaryFocus.key,
+          label: primaryFocus.label,
+          score: primaryFocus.score,
+        },
+      },
+      dimensions,
+      overallScore: averageScore,
+      distribution: (
+        ["excellent", "good", "satisfactory", "needs_improvement"] as Classification[]
+      )
+        .filter((c) => classCounts[c] > 0)
+        .map((c) => ({
+          classification: c,
+          count: classCounts[c],
+          pct: Math.round((classCounts[c] / parsed.length) * 100),
+        })),
+      trend,
+      isEmpty: false,
+      hasSummaryData: parsed.length >= 3,
+    };
+  }
+
+  // --- Per-teacher stats -----------------------------------------------------
+  const lessonsByTeacher = new Map<string, typeof allLessons>();
+  for (const lesson of allLessons) {
+    const arr = lessonsByTeacher.get(lesson.uploaded_by) ?? [];
+    arr.push(lesson);
+    lessonsByTeacher.set(lesson.uploaded_by, arr);
+  }
+
+  const parsedByTeacher = new Map<string, ParsedLesson[]>();
+  for (const p of parsed) {
+    const arr = parsedByTeacher.get(p.uploadedBy) ?? [];
+    arr.push(p);
+    parsedByTeacher.set(p.uploadedBy, arr);
+  }
+
+  const teachers: TeacherStat[] = staffProfiles.map((profile) => {
+    const teacherLessons = lessonsByTeacher.get(profile.id) ?? [];
+    const teacherParsed = parsedByTeacher.get(profile.id) ?? [];
+
+    const teacherScores = teacherParsed.map((p) => toPct(p.payload.overall_score));
+    const teacherAvg = teacherScores.length
+      ? Math.round(teacherScores.reduce((a, b) => a + b, 0) / teacherScores.length)
+      : null;
+
+    let lowestDimension: string | null = null;
+    if (teacherParsed.length > 0) {
+      const dimScoresT: Record<DimensionKey, number[]> = {} as Record<DimensionKey, number[]>;
+      for (const key of DIMENSION_KEY_ORDER) dimScoresT[key] = [];
+      for (const p of teacherParsed) {
+        for (const m of p.payload.metrics) {
+          const k = KEY_MAP[m.name];
+          if (k) dimScoresT[k].push(toPct(m.score));
+        }
+      }
+      const dims = DIMENSION_KEY_ORDER.map((key) => ({
+        label: DIMENSION_LABELS[key],
+        score: avg(dimScoresT[key]) ?? 0,
+      }));
+      lowestDimension = dims.reduce((min, d) => (d.score < min.score ? d : min)).label;
+    }
+
+    const lastAnalysedAt =
+      teacherParsed.length > 0
+        ? teacherParsed.reduce((latest, p) =>
+            p.analysedAt > latest.analysedAt ? p : latest,
+          ).analysedAt
+        : null;
+
+    return {
+      id: profile.id,
+      name: profile.display_name ?? profile.email,
+      email: profile.email,
+      avatarUrl: profile.avatar_url,
+      role: profile.role ?? "teacher",
+      department: profile.department_id ? (deptMap.get(profile.department_id) ?? null) : null,
+      totalLessons: teacherLessons.length,
+      analysedLessons: teacherParsed.length,
+      averageScore: teacherAvg,
+      rating: ratingFromScore(teacherAvg),
+      lowestDimension,
+      lastAnalysedAt,
+    };
+  });
+
+  teachers.sort((a, b) => {
+    if (a.analysedLessons === 0 && b.analysedLessons > 0) return 1;
+    if (b.analysedLessons === 0 && a.analysedLessons > 0) return -1;
+    return (b.averageScore ?? 0) - (a.averageScore ?? 0);
+  });
+
+  const activeTeacherCount = teachers.filter((t) => t.totalLessons > 0).length;
+
+  return {
+    aggregate,
+    teachers,
+    totalTeacherCount: staffProfiles.length,
+    activeTeacherCount,
+    excellentLessonCount,
+    isEmpty: parsed.length === 0,
+  };
+}

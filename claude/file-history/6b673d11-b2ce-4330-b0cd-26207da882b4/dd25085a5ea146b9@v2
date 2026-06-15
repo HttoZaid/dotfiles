@@ -1,0 +1,38 @@
+export const sidebar = {
+    navigation: {
+    overview: "Overview",
+    analytics: "Analytics",
+    lessons: "Lessons",
+    rubric: "Evaluation form",
+    upload_lesson: "Upload Lesson",
+    action_plans: "Action Plans",
+    sign_out: "Sign out",
+    school_management: {
+      title: "Administration",
+      action_plans: "Action Plans",
+      analytics: "School Analytics",
+      profile: "School Profile",
+      structure: "School Structure",
+      staff: "Staff",
+    },
+    organization: {
+      title: "Organization",
+      overview: "Organization",
+      settings: "Settings",
+    },
+    descriptions: {
+      overview: "Your dashboard at a glance",
+      analytics: "Teaching performance insights",
+      lessons: "Browse and review",
+      rubric: "Scoring criteria",
+      upload_lesson: "Submit a new recording",
+      action_plans: "Professional development goals",
+      profile: "Details and settings",
+      structure: "Departments and grades",
+      staff: "Manage teachers",
+      school_analytics: "School-wide performance",
+      organization: "All schools",
+      organization_settings: "Configure organization",
+    },
+  },
+} as const;

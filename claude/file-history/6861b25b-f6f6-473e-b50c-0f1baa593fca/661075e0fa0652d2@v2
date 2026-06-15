@@ -1,0 +1,162 @@
+import { useRouteState } from "@/features/navigation/route-context";
+import { formatManeuverDistance } from "@/features/navigation/lib/format-route";
+import {
+	ArrowLeft,
+	ArrowRight,
+	ArrowUp,
+	ArrowUpLeft,
+	ArrowUpRight,
+	CircleDot,
+	CornerDownLeft,
+	CornerDownRight,
+	MapPin,
+	Navigation,
+	RotateCcw,
+	RotateCw,
+} from "lucide-react-native";
+import type React from "react";
+import { StyleSheet, Text, View } from "react-native";
+import Animated, { FadeInDown, FadeOutUp, LinearTransition } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const ICON_PROPS = { size: 26, strokeWidth: 2.5, color: "#ffffff" } as const;
+
+function ManeuverIcon({ action }: { action: string }): React.ReactNode {
+	switch (action) {
+		case "TURN_LEFT":
+		case "SHARPLY_LEFT":
+		case "LEFT_FORK":
+		case "LEFT_RAMP":
+		case "LEFT_EXIT":
+		case "MOTORWAY_CHANGE_LEFT":
+			return <ArrowLeft {...ICON_PROPS} />;
+		case "TURN_RIGHT":
+		case "SHARPLY_RIGHT":
+		case "RIGHT_FORK":
+		case "RIGHT_RAMP":
+		case "RIGHT_EXIT":
+		case "MOTORWAY_CHANGE_RIGHT":
+			return <ArrowRight {...ICON_PROPS} />;
+		case "SLIGHT_LEFT":
+		case "KEEP_LEFT":
+			return <ArrowUpLeft {...ICON_PROPS} />;
+		case "SLIGHT_RIGHT":
+		case "KEEP_RIGHT":
+			return <ArrowUpRight {...ICON_PROPS} />;
+		case "U_TURN_LEFT":
+			return <RotateCcw {...ICON_PROPS} />;
+		case "U_TURN_RIGHT":
+			return <RotateCw {...ICON_PROPS} />;
+		case "ROUNDABOUT_ENTER":
+		case "ROUNDABOUT_EXIT":
+		case "ROUNDABOUT_PASS":
+			return <CircleDot {...ICON_PROPS} />;
+		case "ENTER_HIGHWAY":
+			return <CornerDownLeft {...ICON_PROPS} />;
+		case "EXIT_HIGHWAY":
+			return <CornerDownRight {...ICON_PROPS} />;
+		case "ARRIVE":
+			return <MapPin {...ICON_PROPS} />;
+		case "DEPART":
+			return <Navigation {...ICON_PROPS} />;
+		default:
+			return <ArrowUp {...ICON_PROPS} />;
+	}
+}
+
+export function ManeuverBanner() {
+	const { phase, maneuverText, maneuverAction, maneuverDistanceMeters } = useRouteState();
+	const insets = useSafeAreaInsets();
+
+	if (phase !== "navigating" || !maneuverText) return null;
+
+	const distanceLabel =
+		maneuverDistanceMeters != null && maneuverDistanceMeters > 30
+			? formatManeuverDistance(maneuverDistanceMeters)
+			: null;
+
+	const isImminent = maneuverDistanceMeters != null && maneuverDistanceMeters <= 30;
+
+	return (
+		<Animated.View
+			entering={FadeInDown.duration(260).springify().damping(22)}
+			exiting={FadeOutUp.duration(180)}
+			layout={LinearTransition.springify().damping(22)}
+			style={[styles.container, { top: insets.top + 10 }]}
+		>
+			{/* Always-dark overlay surface — must be visible over any map tile */}
+			<View style={[styles.pill, isImminent && styles.pillImminent]}>
+				{/* Maneuver icon cell */}
+				<View style={[styles.iconCell, isImminent && styles.iconCellImminent]}>
+					<ManeuverIcon action={maneuverAction ?? "CONTINUE"} />
+				</View>
+
+				{/* Text block */}
+				<View style={styles.textBlock}>
+					{distanceLabel ? (
+						<Text style={styles.distanceLabel}>In {distanceLabel}</Text>
+					) : null}
+					<Text style={styles.maneuverText} numberOfLines={2}>
+						{maneuverText}
+					</Text>
+				</View>
+			</View>
+		</Animated.View>
+	);
+}
+
+const styles = StyleSheet.create({
+	container: {
+		position: "absolute",
+		left: 12,
+		right: 12,
+		zIndex: 50,
+	},
+	pill: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 14,
+		paddingHorizontal: 16,
+		paddingVertical: 14,
+		borderRadius: 20,
+		// Always-dark — map banner must read over any map tile or sky
+		backgroundColor: "rgba(14, 20, 35, 0.96)",
+		shadowColor: "#000",
+		shadowOffset: { width: 0, height: 4 },
+		shadowOpacity: 0.3,
+		shadowRadius: 12,
+		elevation: 12,
+	},
+	pillImminent: {
+		// Amber tint when turn is imminent (≤30m)
+		backgroundColor: "rgba(180, 100, 10, 0.97)",
+	},
+	iconCell: {
+		width: 48,
+		height: 48,
+		borderRadius: 12,
+		alignItems: "center",
+		justifyContent: "center",
+		backgroundColor: "rgba(255, 255, 255, 0.14)",
+	},
+	iconCellImminent: {
+		backgroundColor: "rgba(255, 255, 255, 0.22)",
+	},
+	textBlock: {
+		flex: 1,
+		gap: 3,
+	},
+	distanceLabel: {
+		fontSize: 11,
+		fontWeight: "700",
+		letterSpacing: 1.2,
+		textTransform: "uppercase",
+		color: "rgba(255,255,255,0.55)",
+	},
+	maneuverText: {
+		fontSize: 19,
+		fontWeight: "700",
+		lineHeight: 24,
+		color: "#ffffff",
+	},
+});

@@ -1,0 +1,281 @@
+import { Sheet, SheetExpanded, SheetPeek } from "@/components/ui/sheet";
+import { useCurrentLocation } from "@/features/location/use-current-location";
+import { ArrivalScreen } from "@/features/navigation/components/ArrivalScreen";
+import { ManeuverBanner } from "@/features/navigation/components/ManeuverBanner";
+import { SheetSearch } from "@/features/navigation/components/SheetSearch";
+import { SheetSearchDecoy } from "@/features/navigation/components/SheetSearchDecoy";
+import { RouteStateProvider, useRouteState } from "@/features/navigation/route-context";
+import type { GuidanceProgressEvent, HereMapsViewRef, LatLng, ManeuverEvent } from "expo-here-maps";
+import { HereMapsView } from "expo-here-maps";
+import { Compass, LocateFixed, Navigation } from "lucide-react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, {
+	Easing,
+	FadeInUp,
+	FadeOut,
+	FadeOutDown,
+	interpolate,
+	useAnimatedStyle,
+	useSharedValue,
+	withDelay,
+	withRepeat,
+	withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+// ─── Locating screen ─────────────────────────────────────────────────────────
+
+function PulseRing({ delay = 0 }: { delay?: number }) {
+	const progress = useSharedValue(0);
+
+	useEffect(() => {
+		progress.value = withDelay(
+			delay,
+			withRepeat(
+				withTiming(1, { duration: 1800, easing: Easing.out(Easing.quad) }),
+				-1,
+			),
+		);
+	}, [delay, progress]);
+
+	const style = useAnimatedStyle(() => ({
+		opacity: interpolate(progress.value, [0, 0.4, 1], [0.45, 0.12, 0]),
+		transform: [{ scale: interpolate(progress.value, [0, 1], [1, 2.6]) }],
+	}));
+
+	return (
+		<Animated.View
+			style={[style, { position: "absolute", width: 80, height: 80, borderRadius: 40 }]}
+			className="bg-primary/20"
+		/>
+	);
+}
+
+function LocatingScreen() {
+	const insets = useSafeAreaInsets();
+	return (
+		<View
+			className="flex-1 items-center justify-center bg-background"
+			style={{ paddingBottom: insets.bottom + 32 }}
+		>
+			<View className="h-48 w-48 items-center justify-center">
+				<PulseRing delay={0} />
+				<PulseRing delay={700} />
+				<View className="h-20 w-20 items-center justify-center rounded-full bg-primary/10">
+					<LocateFixed size={32} className="text-primary" strokeWidth={2} />
+				</View>
+			</View>
+			<View className="items-center gap-1.5">
+				<Text className="text-[19px] font-semibold tracking-tight text-foreground">
+					Finding your location
+				</Text>
+				<Text className="text-[15px] text-muted-foreground">This just takes a moment</Text>
+			</View>
+		</View>
+	);
+}
+
+// ─── Map controls (top-right column) ─────────────────────────────────────────
+
+type MapControlsProps = {
+	mapRef: React.RefObject<HereMapsViewRef | null>;
+	location: LatLng | null;
+};
+
+function MapControls({ mapRef, location }: MapControlsProps) {
+	const handleCompassPress = useCallback(() => {
+		if (!location) return;
+		mapRef.current?.setCameraPosition({
+			lat: location.lat,
+			lng: location.lng,
+			bearing: 0,
+			animated: true,
+			distanceMeters: 800,
+		});
+	}, [mapRef, location]);
+
+	return (
+		<View className="gap-3">
+			{/* Compass / North reset — always available, UK standard (like Google Maps) */}
+			<Pressable onPress={handleCompassPress} hitSlop={8} className="active:opacity-60">
+				<View className="h-12 w-12 items-center justify-center rounded-full bg-card shadow-md border border-border/50">
+					<Compass size={21} className="text-foreground" strokeWidth={1.75} />
+				</View>
+			</Pressable>
+		</View>
+	);
+}
+
+// ─── Re-centre button ─────────────────────────────────────────────────────────
+// Appears above the sheet when camera auto-follow is disengaged during navigation.
+// Industry standard: Google Maps, Apple Maps, Waze all use this exact pattern.
+
+function ReCentreButton({ onPress }: { onPress: () => void }) {
+	return (
+		<Animated.View
+			entering={FadeInUp.duration(220).springify().damping(20)}
+			exiting={FadeOutDown.duration(180)}
+		>
+			<Pressable onPress={onPress} className="active:opacity-70">
+				<View className="flex-row items-center gap-2 rounded-full bg-primary px-5 py-3 shadow-lg">
+					<Navigation size={15} color="#fff" fill="#fff" />
+					<Text className="text-[14px] font-semibold text-primary-foreground">
+						Re-centre
+					</Text>
+				</View>
+			</Pressable>
+		</Animated.View>
+	);
+}
+
+// ─── Map screen ───────────────────────────────────────────────────────────────
+
+function MapScreen() {
+	const mapRef = useRef<HereMapsViewRef>(null);
+	const location = useCurrentLocation();
+	const [located, setLocated] = useState(false);
+	const didCenter = useRef(false);
+	const insets = useSafeAreaInsets();
+	const { set, phase } = useRouteState();
+
+	// Tracks whether DynamicCameraBehavior is active.
+	// true  = map auto-follows GPS (normal guidance mode)
+	// false = user panned away, show re-centre button
+	const [isCameraFollowing, setIsCameraFollowing] = useState(true);
+
+	// Reset following state whenever navigation stops
+	useEffect(() => {
+		if (phase !== "navigating") {
+			setIsCameraFollowing(true);
+		}
+	}, [phase]);
+
+	useEffect(() => {
+		if (location && !didCenter.current) {
+			didCenter.current = true;
+			mapRef.current?.setCameraPosition({
+				lat: location.lat,
+				lng: location.lng,
+				distanceMeters: 800,
+			});
+			setLocated(true);
+		}
+	}, [location]);
+
+	const handleGuidanceProgress = useCallback(
+		(e: { nativeEvent: GuidanceProgressEvent }) => {
+			set({
+				remainingMeters: e.nativeEvent.remainingMeters,
+				etaSeconds: e.nativeEvent.etaSeconds,
+			});
+		},
+		[set],
+	);
+
+	const handleManeuver = useCallback(
+		(e: { nativeEvent: ManeuverEvent }) => {
+			set({
+				maneuverText: e.nativeEvent.text,
+				maneuverAction: e.nativeEvent.action,
+				maneuverDistanceMeters: e.nativeEvent.distanceMeters,
+			});
+		},
+		[set],
+	);
+
+	const handleArrived = useCallback(() => {
+		set({ phase: "arrived" });
+	}, [set]);
+
+	// Native fires this the moment the user touches the map during guidance
+	const handleCameraDecouple = useCallback(() => {
+		setIsCameraFollowing(false);
+	}, []);
+
+	// Re-centre: re-attach DynamicCameraBehavior and snap camera back to GPS
+	const handleReCenter = useCallback(async () => {
+		await mapRef.current?.setCameraFollowing(true);
+		setIsCameraFollowing(true);
+	}, []);
+
+	const showReCentre = phase === "navigating" && !isCameraFollowing;
+	// Sheet peek is 160px. Button sits 12px above it.
+	const reCentreBottom = 160 + insets.bottom + 12;
+
+	return (
+		<View style={{ flex: 1 }}>
+			<HereMapsView
+				ref={mapRef}
+				style={StyleSheet.absoluteFill}
+				bearing={0}
+				tilt={0}
+				onGuidanceProgress={handleGuidanceProgress}
+				onManeuver={handleManeuver}
+				onArrived={handleArrived}
+				onCameraDecouple={handleCameraDecouple}
+			/>
+
+			{/* Maneuver banner — top centre */}
+			<ManeuverBanner />
+
+			{/* Map controls — top right */}
+			<View
+				style={{
+					position: "absolute",
+					top: insets.top + 16,
+					right: 16,
+					zIndex: 40,
+				}}
+			>
+				<MapControls
+					mapRef={mapRef}
+					location={location}
+				/>
+			</View>
+
+			{/* Re-centre button — centred above sheet, only when camera is decoupled */}
+			{showReCentre ? (
+				<View
+					style={{
+						position: "absolute",
+						bottom: reCentreBottom,
+						left: 0,
+						right: 0,
+						zIndex: 40,
+						alignItems: "center",
+					}}
+				>
+					<ReCentreButton onPress={handleReCenter} />
+				</View>
+			) : null}
+
+			<Sheet snapPoints={["peek", "half", "full"]}>
+				<SheetPeek>
+					<SheetSearchDecoy />
+				</SheetPeek>
+				<SheetExpanded>
+					<SheetSearch mapRef={mapRef} />
+				</SheetExpanded>
+			</Sheet>
+
+			<ArrivalScreen />
+
+			{!located ? (
+				<Animated.View exiting={FadeOut.duration(400)} style={StyleSheet.absoluteFill}>
+					<LocatingScreen />
+				</Animated.View>
+			) : null}
+		</View>
+	);
+}
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+
+export default function Home() {
+	return (
+		<RouteStateProvider>
+			<MapScreen />
+		</RouteStateProvider>
+	);
+}

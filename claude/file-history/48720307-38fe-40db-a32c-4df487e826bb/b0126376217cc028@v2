@@ -1,0 +1,180 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/mapview.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/checkpoint_action_sheet_widget.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/nearby_checkpoint_popup.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_overlay_buttons.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_search_bar.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_speed_overlay.dart';
+
+class MapScreen extends ConsumerStatefulWidget {
+  const MapScreen({super.key});
+
+  @override
+  ConsumerState<MapScreen> createState() => _MapScreenState();
+}
+
+class _MapScreenState extends ConsumerState<MapScreen> {
+  MapImage? _activeIcon;
+  MapImage? _inactiveIcon;
+  MapImage? _policeIcon;
+  MapImage? _unknownIcon;
+
+  List<Checkpoint>? _pendingCheckpoints;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadIcons());
+  }
+
+  Future<void> _loadIcons() async {
+    _activeIcon = await _loadImage('assets/images/marker_active.png');
+    _inactiveIcon = await _loadImage('assets/images/marker_inactive.png');
+    _policeIcon = await _loadImage('assets/images/marker_police.png');
+    _unknownIcon = await _loadImage('assets/images/marker_unknown.png');
+    if (!mounted) return;
+
+    final checkpoints =
+        _pendingCheckpoints ??
+        ref.read(checkpointNotifierProvider).value?.checkpoints ??
+        [];
+    if (checkpoints.isNotEmpty) {
+      _updateMapCheckpoints(checkpoints);
+      _pendingCheckpoints = null;
+    }
+  }
+
+  void _updateMapCheckpoints(List<Checkpoint> checkpoints) {
+    final active = _activeIcon;
+    final inactive = _inactiveIcon;
+    final police = _policeIcon;
+    final unknown = _unknownIcon;
+
+    if (active == null ||
+        inactive == null ||
+        police == null ||
+        unknown == null) {
+      _pendingCheckpoints = checkpoints;
+      return;
+    }
+
+    ref.read(mapControllerProvider.notifier).updateCheckpoints(checkpoints, {
+      ContributionStatusEnum.ACTIVE: active,
+      ContributionStatusEnum.INACTIVE: inactive,
+      ContributionStatusEnum.POLICE_ALERT: police,
+      ContributionStatusEnum.UNKNOWN: unknown,
+    });
+  }
+
+  Future<MapImage> _loadImage(String asset) async {
+    final bytes = await rootBundle.load(asset);
+    return MapImage.withPixelDataAndImageFormat(
+      bytes.buffer.asUint8List(),
+      ImageFormat.png,
+    );
+  }
+
+  void _onMapCreated(HereMapController hereMapController) {
+    ref.read(mapControllerProvider.notifier).setController(
+      hereMapController,
+      _onCheckpointTapped,
+    );
+
+    hereMapController.camera.addListener(
+      MapCameraListener((cameraState) {
+        ref.read(mapBearingProvider.notifier).state =
+            cameraState.orientationAtTarget.bearing;
+      }),
+    );
+  }
+
+  void _onCheckpointTapped(String checkpointId) {
+    final checkpoints =
+        ref.read(checkpointNotifierProvider).value?.checkpoints ?? [];
+    final checkpoint =
+        checkpoints.where((c) => c.id == checkpointId).firstOrNull;
+    if (checkpoint != null && context.mounted) {
+      unawaited(
+        showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => CheckpointActionSheet(checkpoint: checkpoint),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref
+      ..listen(userLocationStreamProvider, (previous, next) {
+        final position = next.value;
+        if (position != null) {
+          ref.read(mapControllerProvider.notifier).updateLocation(
+            GeoCoordinates(position.latitude, position.longitude),
+          );
+        }
+      })
+      ..listen(checkpointNotifierProvider, (previous, next) {
+        next.whenData((data) {
+          _updateMapCheckpoints(data.checkpoints);
+        });
+      });
+
+    final bottomInset =
+        MediaQuery.of(context).padding.bottom + 16;
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: HereMap(onMapCreated: _onMapCreated),
+          ),
+
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: MapSearchBar(
+              onCheckpointSelected: (checkpoint) {
+                ref
+                    .read(mapControllerProvider.notifier)
+                    .focusOnCheckpoint(checkpoint);
+              },
+            ),
+          ),
+
+          Positioned(
+            bottom: bottomInset,
+            left: 0,
+            right: 0,
+            child: const NearbyCheckpointPopup(),
+          ),
+
+          Positioned(
+            bottom: bottomInset,
+            left: 16,
+            child: const MapSpeedOverlay(),
+          ),
+
+          Positioned(
+            bottom: bottomInset,
+            right: 16,
+            child: const MapOverlayButtons(),
+          ),
+        ],
+      ),
+    );
+  }
+}

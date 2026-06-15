@@ -1,0 +1,832 @@
+-- =============================================================================
+-- LEARNALYZE DEV SEED  — data only
+-- auth.users is handled by seed_users.ts (GoTrue Admin API) — run that first.
+--
+-- ENUM VALUES (from migrations)
+-- ─────────────────────────────────────────────────────────────────────────────
+--  user_role          : teacher | head_of_department | principal | org_admin
+--  onboarding_stage   : role_pending | workspace_pending | details_pending | complete
+--  lesson_status      : pending | uploaded | processing | ready | failed
+--  lesson_source      : video_upload | live_recording | transcript
+--  feedback_lang      : en | ar
+--  invitation_status  : pending | accepted | expired | revoked
+--  notification_tone  : info | success | warning | danger | neutral
+--
+-- CONSTRAINTS TO KNOW
+--   profiles_role_scope_coherent:
+--     teacher            → school_id can be NULL (solo teachers allowed)
+--     head_of_department → school_id required
+--     principal          → school_id required
+--     org_admin          → organization_id required, school_id must be NULL
+--   invitations_role_scope_coherent:
+--     teacher/hod/principal → school_id required, organization_id NULL
+--     org_admin             → organization_id required, school_id NULL
+--   invitations_hod_needs_department:
+--     head_of_department requires department_name
+--   lessons_subject_present_when_school:
+--     school_id set → subject_id OR subject_label must be non-null
+--
+-- ID NAMESPACE
+--   0000-0000-0000-XXXX  structural (orgs, schools, phases, depts, grades…)
+--   0000-0000-0001-XXXX  profiles (auth.users created by seed_users.ts)
+--   0000-0000-0002-XXXX  teacher_grades
+--   0000-0000-0003-XXXX  lessons
+--   0000-0000-0004-XXXX  lesson_analyses
+--   0000-0000-0005-XXXX  invitations
+--   0000-0000-0006-XXXX  notifications
+--   0000-0000-0007-XXXX  notification_events
+--   0000-0000-0008-XXXX  action_plans
+--
+-- EDGE CASES
+--   school-3   organization_id = NULL  (standalone school, no org)
+--   dept-6     phase_id = NULL         (dept not tied to any phase)
+--   user-10    teacher, no school, no org  (solo teacher)
+--   user-11    teacher, school set, dept/subject NULL  (joined, not placed)
+--   user-12    teacher, school + dept set, subject NULL
+--   user-13    teacher at standalone school (no org)
+--   lesson-11  school_id = NULL, org only
+--   lesson-12  standalone school, no org, dept/subject NULL
+--   lesson-13  no school, no org (solo teacher lesson)
+--   invite-6   to standalone school (organization_id = NULL)
+-- =============================================================================
+
+
+-- =============================================================================
+-- 0. ORGANISATIONS
+-- =============================================================================
+
+INSERT INTO public.organizations (id, name, created_by, created_at, updated_at) VALUES
+  ('00000000-0000-0000-0000-000000000001',
+   'Learnalyze Demo Org',
+   '00000000-0000-0000-0001-000000000001',
+   now(), now())
+ON CONFLICT (id) DO UPDATE SET
+  name       = EXCLUDED.name,
+  created_by = EXCLUDED.created_by,
+  updated_at = now();
+
+
+-- =============================================================================
+-- 1. SCHOOLS
+-- =============================================================================
+
+INSERT INTO public.schools (id, organization_id, name, country, created_by, created_at, updated_at) VALUES
+  ('00000000-0000-0000-0000-000000000010',
+   '00000000-0000-0000-0000-000000000001',
+   'Northgate Academy', 'GB',
+   '00000000-0000-0000-0001-000000000001',
+   now(), now()),
+
+  ('00000000-0000-0000-0000-000000000011',
+   '00000000-0000-0000-0000-000000000001',
+   'Southbrook College', 'GB',
+   '00000000-0000-0000-0001-000000000001',
+   now(), now()),
+
+  -- EDGE: standalone school — no org
+  ('00000000-0000-0000-0000-000000000012',
+   NULL,
+   'Riverside Free School', 'GB',
+   '00000000-0000-0000-0001-000000000013',
+   now(), now())
+ON CONFLICT (id) DO UPDATE SET
+  organization_id = EXCLUDED.organization_id,
+  name            = EXCLUDED.name,
+  country         = EXCLUDED.country,
+  created_by      = EXCLUDED.created_by,
+  updated_at      = now();
+
+
+-- =============================================================================
+-- 2. PHASES
+-- =============================================================================
+
+INSERT INTO public.phases (id, school_id, name, sort_order, created_at) VALUES
+  -- Northgate
+  ('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000010', 'KS3',        1, now()),
+  ('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000010', 'KS4',        2, now()),
+  ('00000000-0000-0000-0000-000000000022', '00000000-0000-0000-0000-000000000010', 'Sixth Form', 3, now()),
+  -- Southbrook
+  ('00000000-0000-0000-0000-000000000023', '00000000-0000-0000-0000-000000000011', 'Lower School', 1, now()),
+  ('00000000-0000-0000-0000-000000000024', '00000000-0000-0000-0000-000000000011', 'Upper School', 2, now()),
+  -- Riverside
+  ('00000000-0000-0000-0000-000000000025', '00000000-0000-0000-0000-000000000012', 'Primary', 1, now());
+
+
+-- =============================================================================
+-- 3. DEPARTMENTS
+-- =============================================================================
+
+INSERT INTO public.departments (id, school_id, phase_id, name, created_at, updated_at) VALUES
+  -- Northgate
+  ('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 'Science',     now(), now()),
+  ('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000021', 'Mathematics', now(), now()),
+  ('00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000022', 'English',     now(), now()),
+  -- Southbrook
+  ('00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000023', 'Humanities', now(), now()),
+  ('00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000024', 'Computing',  now(), now()),
+  -- Riverside — EDGE: phase_id = NULL
+  ('00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000012', NULL, 'General Studies', now(), now());
+
+
+-- =============================================================================
+-- 4. SUBJECTS
+-- =============================================================================
+
+INSERT INTO public.subjects (id, department_id, name, is_active, created_at) VALUES
+  ('00000000-0000-0000-0000-000000000040', '00000000-0000-0000-0000-000000000030', 'Biology',          true,  now()),
+  ('00000000-0000-0000-0000-000000000041', '00000000-0000-0000-0000-000000000030', 'Chemistry',        true,  now()),
+  ('00000000-0000-0000-0000-000000000042', '00000000-0000-0000-0000-000000000030', 'Physics',          false, now()), -- inactive
+  ('00000000-0000-0000-0000-000000000043', '00000000-0000-0000-0000-000000000031', 'Core Maths',       true,  now()),
+  ('00000000-0000-0000-0000-000000000044', '00000000-0000-0000-0000-000000000031', 'Further Maths',    true,  now()),
+  ('00000000-0000-0000-0000-000000000045', '00000000-0000-0000-0000-000000000032', 'English Lit',      true,  now()),
+  ('00000000-0000-0000-0000-000000000046', '00000000-0000-0000-0000-000000000033', 'History',          true,  now()),
+  ('00000000-0000-0000-0000-000000000047', '00000000-0000-0000-0000-000000000034', 'Computer Science', true,  now()),
+  ('00000000-0000-0000-0000-000000000048', '00000000-0000-0000-0000-000000000035', 'Literacy',         true,  now());
+
+
+-- =============================================================================
+-- 5. GRADES
+-- =============================================================================
+
+INSERT INTO public.grades (id, school_id, name, sort_order, created_at) VALUES
+  -- Northgate
+  ('00000000-0000-0000-0000-000000000050', '00000000-0000-0000-0000-000000000010', 'Year 7',  1, now()),
+  ('00000000-0000-0000-0000-000000000051', '00000000-0000-0000-0000-000000000010', 'Year 8',  2, now()),
+  ('00000000-0000-0000-0000-000000000052', '00000000-0000-0000-0000-000000000010', 'Year 9',  3, now()),
+  ('00000000-0000-0000-0000-000000000053', '00000000-0000-0000-0000-000000000010', 'Year 10', 4, now()),
+  ('00000000-0000-0000-0000-000000000054', '00000000-0000-0000-0000-000000000010', 'Year 11', 5, now()),
+  ('00000000-0000-0000-0000-000000000055', '00000000-0000-0000-0000-000000000010', 'Year 12', 6, now()),
+  ('00000000-0000-0000-0000-000000000056', '00000000-0000-0000-0000-000000000010', 'Year 13', 7, now()),
+  -- Southbrook
+  ('00000000-0000-0000-0000-000000000057', '00000000-0000-0000-0000-000000000011', 'Form 1', 1, now()),
+  ('00000000-0000-0000-0000-000000000058', '00000000-0000-0000-0000-000000000011', 'Form 2', 2, now()),
+  ('00000000-0000-0000-0000-000000000059', '00000000-0000-0000-0000-000000000011', 'Form 3', 3, now()),
+  -- Riverside
+  ('00000000-0000-0000-0000-000000000060', '00000000-0000-0000-0000-000000000012', 'Class 1', 1, now()),
+  ('00000000-0000-0000-0000-000000000061', '00000000-0000-0000-0000-000000000012', 'Class 2', 2, now());
+
+
+-- =============================================================================
+-- 6. PROFILES
+-- =============================================================================
+-- handle_new_user trigger already created bare rows when GoTrue inserted the
+-- auth users. Upsert here to fill all fields without failing on existing rows.
+
+INSERT INTO public.profiles (
+  id, email, display_name, role,
+  organization_id, school_id, department_id, phase_id, subject_id,
+  onboarding_stage, created_at, updated_at
+) VALUES
+
+  -- org_admin: organization_id required, school_id must be NULL
+  ('00000000-0000-0000-0001-000000000001',
+   'org.admin@learnalyze.dev', 'Omar Admin', 'org_admin',
+   '00000000-0000-0000-0000-000000000001', NULL, NULL, NULL, NULL,
+   'complete', now(), now()),
+
+  -- principals: school required
+  ('00000000-0000-0000-0001-000000000002',
+   'admin.northgate@learnalyze.dev', 'Alice Northgate', 'principal',
+   NULL, '00000000-0000-0000-0000-000000000010', NULL, NULL, NULL,
+   'complete', now(), now()),
+
+  ('00000000-0000-0000-0001-000000000003',
+   'admin.southbrook@learnalyze.dev', 'Ben Southbrook', 'principal',
+   NULL, '00000000-0000-0000-0000-000000000011', NULL, NULL, NULL,
+   'complete', now(), now()),
+
+  -- head_of_department: school + dept required
+  ('00000000-0000-0000-0001-000000000004',
+   'hod.science@learnalyze.dev', 'Dr. Claire Holt', 'head_of_department',
+   NULL, '00000000-0000-0000-0000-000000000010',
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000020', NULL,
+   'complete', now(), now()),
+
+  -- teachers: fully placed
+  ('00000000-0000-0000-0001-000000000005',
+   'teacher.bio@learnalyze.dev', 'Eve Rahman', 'teacher',
+   NULL, '00000000-0000-0000-0000-000000000010',
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000020',
+   '00000000-0000-0000-0000-000000000040',
+   'complete', now(), now()),
+
+  ('00000000-0000-0000-0001-000000000006',
+   'teacher.maths@learnalyze.dev', 'Finn Okafor', 'teacher',
+   NULL, '00000000-0000-0000-0000-000000000010',
+   '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000021',
+   '00000000-0000-0000-0000-000000000043',
+   'complete', now(), now()),
+
+  ('00000000-0000-0000-0001-000000000008',
+   'teacher.history@learnalyze.dev', 'Hamid Yusuf', 'teacher',
+   NULL, '00000000-0000-0000-0000-000000000011',
+   '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000023',
+   '00000000-0000-0000-0000-000000000046',
+   'complete', now(), now()),
+
+  -- pending: role not yet chosen
+  ('00000000-0000-0000-0001-000000000009',
+   'pending.onboard@learnalyze.dev', NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL,
+   'role_pending', now(), now()),
+
+  -- EDGE: solo teacher — no school, no org (teacher exempt from school_id constraint)
+  ('00000000-0000-0000-0001-000000000010',
+   'solo.teacher@learnalyze.dev', 'Isla Solo', 'teacher',
+   NULL, NULL, NULL, NULL, NULL,
+   'details_pending', now(), now()),
+
+  -- EDGE: school set, dept/subject NULL — joined Northgate, not yet placed
+  ('00000000-0000-0000-0001-000000000011',
+   'unplaced.teacher@learnalyze.dev', 'James Unplaced', 'teacher',
+   NULL, '00000000-0000-0000-0000-000000000010', NULL, NULL, NULL,
+   'details_pending', now(), now()),
+
+  -- EDGE: school + dept set, subject NULL
+  ('00000000-0000-0000-0001-000000000012',
+   'nosubject.teacher@learnalyze.dev', 'Kezia Nosubject', 'teacher',
+   NULL, '00000000-0000-0000-0000-000000000010',
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000020', NULL,
+   'complete', now(), now()),
+
+  -- EDGE: standalone school teacher — school has no org so org NULL here too
+  ('00000000-0000-0000-0001-000000000013',
+   'riverside.teacher@learnalyze.dev', 'Lena Riverside', 'teacher',
+   NULL, '00000000-0000-0000-0000-000000000012',
+   '00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000025',
+   '00000000-0000-0000-0000-000000000048',
+   'complete', now(), now())
+
+ON CONFLICT (id) DO UPDATE SET
+  display_name     = EXCLUDED.display_name,
+  role             = EXCLUDED.role,
+  organization_id  = EXCLUDED.organization_id,
+  school_id        = EXCLUDED.school_id,
+  department_id    = EXCLUDED.department_id,
+  phase_id         = EXCLUDED.phase_id,
+  subject_id       = EXCLUDED.subject_id,
+  onboarding_stage = EXCLUDED.onboarding_stage,
+  updated_at       = now();
+
+
+-- =============================================================================
+-- 7. TEACHER GRADES
+-- =============================================================================
+
+INSERT INTO public.teacher_grades (id, profile_id, grade_id, created_at) VALUES
+  -- Eve Rahman (biology) — Y7, Y8, Y9
+  ('00000000-0000-0000-0002-000000000001', '00000000-0000-0000-0001-000000000005', '00000000-0000-0000-0000-000000000050', now()),
+  ('00000000-0000-0000-0002-000000000002', '00000000-0000-0000-0001-000000000005', '00000000-0000-0000-0000-000000000051', now()),
+  ('00000000-0000-0000-0002-000000000003', '00000000-0000-0000-0001-000000000005', '00000000-0000-0000-0000-000000000052', now()),
+  -- Finn Okafor (maths) — Y10, Y11, Y12
+  ('00000000-0000-0000-0002-000000000004', '00000000-0000-0000-0001-000000000006', '00000000-0000-0000-0000-000000000053', now()),
+  ('00000000-0000-0000-0002-000000000005', '00000000-0000-0000-0001-000000000006', '00000000-0000-0000-0000-000000000054', now()),
+  ('00000000-0000-0000-0002-000000000006', '00000000-0000-0000-0001-000000000006', '00000000-0000-0000-0000-000000000055', now()),
+  -- Hamid Yusuf (history) — Form 1, Form 2
+  ('00000000-0000-0000-0002-000000000007', '00000000-0000-0000-0001-000000000008', '00000000-0000-0000-0000-000000000057', now()),
+  ('00000000-0000-0000-0002-000000000008', '00000000-0000-0000-0001-000000000008', '00000000-0000-0000-0000-000000000058', now()),
+  -- Lena Riverside — Class 1, Class 2
+  ('00000000-0000-0000-0002-000000000009', '00000000-0000-0000-0001-000000000013', '00000000-0000-0000-0000-000000000060', now()),
+  ('00000000-0000-0000-0002-000000000010', '00000000-0000-0000-0001-000000000013', '00000000-0000-0000-0000-000000000061', now()),
+  -- Kezia Nosubject — Y7, Y8
+  ('00000000-0000-0000-0002-000000000011', '00000000-0000-0000-0001-000000000012', '00000000-0000-0000-0000-000000000050', now()),
+  ('00000000-0000-0000-0002-000000000012', '00000000-0000-0000-0001-000000000012', '00000000-0000-0000-0000-000000000051', now());
+
+
+-- =============================================================================
+-- 8. LESSONS
+-- =============================================================================
+
+INSERT INTO public.lessons (
+  id, uploaded_by, assigned_to,
+  school_id, organization_id, department_id, subject_id,
+  subject_label, grade_label,
+  title, source, status,
+  r2_path, r2_bucket,
+  file_name, file_size, mime_type, duration_secs,
+  error_message,
+  created_at, updated_at
+) VALUES
+
+  -- pending
+  ('00000000-0000-0000-0003-000000000001',
+   '00000000-0000-0000-0001-000000000005', NULL,
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000040',
+   'Biology', 'Year 7',
+   'Cell Division — Introduction', 'video_upload', 'pending',
+   'schools/school-1/lessons/lesson-001.mp4', 'learnalyze-dev',
+   'cell-division-intro.mp4', 104857600, 'video/mp4', 2340, NULL,
+   now() - interval '2 hours', now() - interval '2 hours'),
+
+  -- uploaded (r2 confirmed, worker not yet started)
+  ('00000000-0000-0000-0003-000000000002',
+   '00000000-0000-0000-0001-000000000005',
+   '00000000-0000-0000-0001-000000000004',
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000040',
+   'Biology', 'Year 8',
+   'Photosynthesis Deep Dive', 'video_upload', 'uploaded',
+   'schools/school-1/lessons/lesson-002.mp4', 'learnalyze-dev',
+   'photosynthesis.mp4', 209715200, 'video/mp4', 3600, NULL,
+   now() - interval '90 minutes', now() - interval '90 minutes'),
+
+  -- processing
+  ('00000000-0000-0000-0003-000000000003',
+   '00000000-0000-0000-0001-000000000005', NULL,
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000040',
+   'Biology', 'Year 9',
+   'Ecosystems & Food Chains', 'video_upload', 'processing',
+   'schools/school-1/lessons/lesson-003.mp4', 'learnalyze-dev',
+   'ecosystems.mp4', 157286400, 'video/mp4', 2700, NULL,
+   now() - interval '1 hour', now() - interval '30 minutes'),
+
+  -- ready — full analysis attached below
+  ('00000000-0000-0000-0003-000000000004',
+   '00000000-0000-0000-0001-000000000005', NULL,
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000040',
+   'Biology', 'Year 9',
+   'Cell Respiration — Aerobic & Anaerobic', 'video_upload', 'ready',
+   'schools/school-1/lessons/lesson-004.mp4', 'learnalyze-dev',
+   'cell-respiration.mp4', 131072000, 'video/mp4', 2460, NULL,
+   now() - interval '3 days', now() - interval '1 day'),
+
+  -- failed — error_message set, duration NULL
+  ('00000000-0000-0000-0003-000000000005',
+   '00000000-0000-0000-0001-000000000006', NULL,
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000043',
+   'Mathematics', 'Year 10',
+   'Quadratics — Factorising Practice', 'video_upload', 'failed',
+   'schools/school-1/lessons/lesson-005.mp4', 'learnalyze-dev',
+   'quadratics.mp4', 52428800, 'video/mp4', NULL,
+   'Transcription service timed out after 3 retries. File may be corrupted.',
+   now() - interval '5 hours', now() - interval '4 hours'),
+
+  -- ready — maths northgate
+  ('00000000-0000-0000-0003-000000000006',
+   '00000000-0000-0000-0001-000000000006', NULL,
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000043',
+   'Mathematics', 'Year 11',
+   'Trigonometry — Sine & Cosine Rule', 'video_upload', 'ready',
+   'schools/school-1/lessons/lesson-006.mp4', 'learnalyze-dev',
+   'trig-sine-cosine.mp4', 78643200, 'video/mp4', 1800, NULL,
+   now() - interval '7 days', now() - interval '5 days'),
+
+  -- ready — southbrook, cross-school isolation
+  ('00000000-0000-0000-0003-000000000007',
+   '00000000-0000-0000-0001-000000000008', NULL,
+   '00000000-0000-0000-0000-000000000011', NULL,
+   '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000046',
+   'History', 'Form 2',
+   'World War I — Causes & Consequences', 'video_upload', 'ready',
+   'schools/school-2/lessons/lesson-007.mp4', 'learnalyze-dev',
+   'ww1-causes.mp4', 188743680, 'video/mp4', 3120, NULL,
+   now() - interval '2 days', now() - interval '1 day'),
+
+  -- ready — assigned to HOD for review
+  ('00000000-0000-0000-0003-000000000008',
+   '00000000-0000-0000-0001-000000000005',
+   '00000000-0000-0000-0001-000000000004',
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000041',
+   'Chemistry', 'Year 9',
+   'Periodic Table — Group Properties', 'video_upload', 'ready',
+   'schools/school-1/lessons/lesson-008.mp4', 'learnalyze-dev',
+   'periodic-table.mp4', 141557760, 'video/mp4', 2580, NULL,
+   now() - interval '1 day', now() - interval '12 hours'),
+
+  -- ready — live_recording source
+  ('00000000-0000-0000-0003-000000000009',
+   '00000000-0000-0000-0001-000000000006', NULL,
+   '00000000-0000-0000-0000-000000000010', NULL,
+   '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000044',
+   'Mathematics', 'Year 12',
+   'Further Maths — Complex Numbers', 'live_recording', 'ready',
+   'schools/school-1/lessons/lesson-009.mp4', 'learnalyze-dev',
+   'complex-numbers-live.mp4', 167772160, 'video/mp4', 2880, NULL,
+   now() - interval '4 days', now() - interval '3 days'),
+
+  -- ready — transcript source, no duration
+  ('00000000-0000-0000-0003-000000000010',
+   '00000000-0000-0000-0001-000000000008', NULL,
+   '00000000-0000-0000-0000-000000000011', NULL,
+   '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000046',
+   'History', 'Form 3',
+   'Cold War — Cuban Missile Crisis', 'transcript', 'ready',
+   'schools/school-2/lessons/lesson-010.txt', 'learnalyze-dev',
+   'cold-war-transcript.txt', 48320, 'text/plain', NULL, NULL,
+   now() - interval '6 days', now() - interval '4 days'),
+
+  -- EDGE: org-level, school_id = NULL
+  --   no school constraint → no subject required
+  ('00000000-0000-0000-0003-000000000011',
+   '00000000-0000-0000-0001-000000000001', NULL,
+   NULL, '00000000-0000-0000-0000-000000000001',
+   NULL, NULL, 'Cross-School CPD', NULL,
+   'Org-Wide CPD Session — Growth Mindset', 'video_upload', 'ready',
+   'orgs/org-1/lessons/lesson-011.mp4', 'learnalyze-dev',
+   'cpd-growth-mindset.mp4', 230686720, 'video/mp4', 4500, NULL,
+   now() - interval '8 days', now() - interval '6 days'),
+
+  -- EDGE: standalone school, no org, dept/subject NULL
+  --   school_id set → subject_label satisfies the constraint
+  ('00000000-0000-0000-0003-000000000012',
+   '00000000-0000-0000-0001-000000000013', NULL,
+   '00000000-0000-0000-0000-000000000012', NULL,
+   NULL, NULL, 'Literacy', 'Class 1',
+   'Phonics Session — Short Vowels', 'video_upload', 'ready',
+   'schools/school-3/lessons/lesson-012.mp4', 'learnalyze-dev',
+   'phonics-short-vowels.mp4', 41943040, 'video/mp4', 1200, NULL,
+   now() - interval '4 days', now() - interval '3 days'),
+
+  -- EDGE: solo teacher, no school, no org
+  --   school_id NULL → subject constraint not triggered
+  ('00000000-0000-0000-0003-000000000013',
+   '00000000-0000-0000-0001-000000000010', NULL,
+   NULL, NULL, NULL, NULL, 'A-Level Chemistry', 'Year 13',
+   'Organic Chemistry — Functional Groups', 'video_upload', 'ready',
+   'solo/user-10/lessons/lesson-013.mp4', 'learnalyze-dev',
+   'organic-chem.mp4', 94371840, 'video/mp4', 2100, NULL,
+   now() - interval '5 days', now() - interval '4 days');
+
+
+-- =============================================================================
+-- 9. LESSON GRADES
+-- =============================================================================
+
+INSERT INTO public.lesson_grades (lesson_id, grade_id) VALUES
+  ('00000000-0000-0000-0003-000000000001', '00000000-0000-0000-0000-000000000050'), -- lesson-1: Y7
+  ('00000000-0000-0000-0003-000000000004', '00000000-0000-0000-0000-000000000051'), -- lesson-4: Y8
+  ('00000000-0000-0000-0003-000000000004', '00000000-0000-0000-0000-000000000052'), -- lesson-4: Y9
+  ('00000000-0000-0000-0003-000000000006', '00000000-0000-0000-0000-000000000054'), -- lesson-6: Y11
+  ('00000000-0000-0000-0003-000000000007', '00000000-0000-0000-0000-000000000058'), -- lesson-7: Form 2
+  ('00000000-0000-0000-0003-000000000008', '00000000-0000-0000-0000-000000000052'), -- lesson-8: Y9
+  ('00000000-0000-0000-0003-000000000008', '00000000-0000-0000-0000-000000000053'), -- lesson-8: Y10
+  ('00000000-0000-0000-0003-000000000012', '00000000-0000-0000-0000-000000000060'); -- lesson-12: Class 1
+
+
+-- =============================================================================
+-- 10. LESSON ANALYSES
+-- =============================================================================
+
+INSERT INTO public.lesson_analyses (id, lesson_id, kind, payload, model, created_at) VALUES
+
+  -- lesson-4: all three kinds (richest fixture)
+  ('00000000-0000-0000-0004-000000000001',
+   '00000000-0000-0000-0003-000000000004', 'transcript',
+   '{"segments":[{"start":0,"end":30,"text":"Good morning everyone, today we are looking at cell respiration..."},{"start":30,"end":90,"text":"Let''s start with aerobic respiration — glucose plus oxygen."}],"word_count":1842,"language":"en"}',
+   'whisper-large-v3', now() - interval '1 day'),
+
+  ('00000000-0000-0000-0004-000000000002',
+   '00000000-0000-0000-0003-000000000004', 'rubric_feedback',
+   '{"overall_score":78,"dimensions":{"clarity":80,"engagement":75,"questioning":72,"pace":85},"strengths":["Clear learning objective stated at outset","Good use of real-world examples"],"development_areas":["Increase wait time after questions","More student-led discussion opportunities"],"summary":"A solid lesson with clear structure. Questioning could be opened up further."}',
+   'claude-opus-4-20250514', now() - interval '23 hours'),
+
+  ('00000000-0000-0000-0004-000000000003',
+   '00000000-0000-0000-0003-000000000004', 'talk_ratio',
+   '{"teacher_pct":68,"student_pct":22,"silence_pct":10,"teacher_words":1249,"student_words":393}',
+   'internal', now() - interval '23 hours'),
+
+  -- lesson-7: transcript + rubric
+  ('00000000-0000-0000-0004-000000000004',
+   '00000000-0000-0000-0003-000000000007', 'transcript',
+   '{"segments":[{"start":0,"end":45,"text":"Right, today we''re covering the causes of World War One — the MAIN acronym..."}],"word_count":2104,"language":"en"}',
+   'whisper-large-v3', now() - interval '1 day'),
+
+  ('00000000-0000-0000-0004-000000000005',
+   '00000000-0000-0000-0003-000000000007', 'rubric_feedback',
+   '{"overall_score":84,"dimensions":{"clarity":88,"engagement":82,"questioning":79,"pace":88},"strengths":["Strong narrative arc","Excellent use of primary source quotes"],"development_areas":["Cold call could replace hands-up","Check for understanding mid-lesson"],"summary":"Highly engaging lesson. Storytelling approach kept students attentive throughout."}',
+   'claude-opus-4-20250514', now() - interval '22 hours'),
+
+  -- lesson-8: rubric only (transcript still pending)
+  ('00000000-0000-0000-0004-000000000006',
+   '00000000-0000-0000-0003-000000000008', 'rubric_feedback',
+   '{"overall_score":71,"dimensions":{"clarity":70,"engagement":65,"questioning":74,"pace":75},"strengths":["Accurate scientific content","Good lab-safety reminder"],"development_areas":["Opening hook could be stronger","More formative check-ins needed"],"summary":"Competent delivery. Some pacing issues in the middle third."}',
+   'claude-opus-4-20250514', now() - interval '10 hours'),
+
+  -- lesson-10: transcript source → only a transcript analysis
+  ('00000000-0000-0000-0004-000000000007',
+   '00000000-0000-0000-0003-000000000010', 'transcript',
+   '{"segments":[{"start":0,"end":60,"text":"Today we examine the events of October 1962 and the standoff over Soviet missiles in Cuba..."}],"word_count":3241,"language":"en"}',
+   'whisper-large-v3', now() - interval '4 days'),
+
+  -- lesson-11: org CPD, school NULL → analysis on school-NULL lesson
+  ('00000000-0000-0000-0004-000000000008',
+   '00000000-0000-0000-0003-000000000011', 'rubric_feedback',
+   '{"overall_score":90,"dimensions":{"clarity":91,"engagement":89,"questioning":88,"pace":92},"strengths":["Excellent facilitation","Strong audience engagement throughout"],"development_areas":["Could distribute speaking time more evenly"],"summary":"Outstanding CPD session. Well-paced and clearly delivered."}',
+   'claude-opus-4-20250514', now() - interval '6 days'),
+
+  -- lesson-12: riverside, no dept/org → analysis with null structural context
+  ('00000000-0000-0000-0004-000000000009',
+   '00000000-0000-0000-0003-000000000012', 'transcript',
+   '{"segments":[{"start":0,"end":20,"text":"Today we are going to practise our short vowel sounds..."}],"word_count":412,"language":"en"}',
+   'whisper-large-v3', now() - interval '3 days'),
+
+  -- lesson-13: solo teacher, no school/org → analysis with zero context
+  ('00000000-0000-0000-0004-000000000010',
+    '00000000-0000-0000-0003-000000000013', 'rubric_feedback',
+    '{"overall_score":81,"dimensions":{"clarity":83,"engagement":80,"questioning":78,"pace":84},"strengths":["Strong subject knowledge","Well-structured explanation"],"development_areas":["More formative checks mid-lesson","Pace the board work slower"],"summary":"Solid solo lesson. Clear explanations, would benefit from more student interaction."}',
+    'claude-opus-4-20250514', now() - interval '3 days'),
+
+  -- lesson-13: full analysis with 6 dimensions (for action plan coaching)
+  ('00000000-0000-0000-0004-000000000011',
+    '00000000-0000-0000-0003-000000000013', 'full_analysis',
+    '{"lesson_id":"00000000-0000-0000-0003-000000000013","overall_score":68,"classification":"Good","summary":"An engaging biology lesson on cricket anatomy and behaviour with strong student participation. Behaviour management and technology integration need improvement.","metrics":[{"name":"lesson_structure","label":"Good","score":11,"narrative":"The lesson demonstrated a generally clear structure with a logical sequence of activities. The teacher provided explicit instructions for tasks and activities progressed logically from observation to discussion. A more explicit statement of learning goals at the outset could further enhance structural clarity.","factors":[{"text":"Clear instructions for group activities and transitions.","type":"strength"},{"text":"Logical sequencing of activities from observation to discussion.","type":"strength"},{"text":"Explicitly state the learning objectives at the beginning of the lesson.","type":"improvement","technique":"Learning Objectives"},{"text":"Ensure all instructions are delivered before students begin an activity.","type":"improvement","technique":"Clear Instructions"}]},{"name":"behaviour_management","label":"Satisfactory","score":10,"narrative":"The teacher generally maintained a positive learning environment and used established signals to regain student attention. However, there was a noticeable instance where off-task behaviour went unaddressed for an extended period. More proactive intervention would strengthen classroom control.","factors":[{"text":"Uses clear attention signals to manage the class.","type":"strength"},{"text":"Maintains a generally positive and calm classroom atmosphere.","type":"strength"},{"text":"Address off-task behavior immediately and directly to prevent escalation.","type":"improvement","technique":"Proactive Classroom Management"},{"text":"Establish and reinforce clear expectations for handling materials during hands-on activities.","type":"improvement","technique":"Classroom Routines"}]},{"name":"clarity","label":"Good","score":16,"narrative":"The teacher''s explanations were generally clear and well-organized, particularly when introducing new vocabulary. She provided precise instructions for hands-on activities, ensuring students understood how to interact with the materials safely. Questioning could have been more specific to elicit precise responses.","factors":[{"text":"Clear and accurate explanations of scientific terms.","type":"strength"},{"text":"Detailed and precise instructions for practical activities.","type":"strength"},{"text":"Use more specific language when asking for student input.","type":"improvement","technique":"Precision in Questioning"},{"text":"Ensure all student questions are fully addressed before moving on.","type":"improvement","technique":"Responsive Teaching"}]},{"name":"formative_assessment","label":"Satisfactory","score":12,"narrative":"The teacher employed various formative assessment techniques including thumbs up/down checks and probing questions. However, a significant portion of the lesson showed repeated hand-raising without recorded verbal interaction, representing missed opportunities for assessing individual understanding.","factors":[{"text":"Uses thumbs up/down for quick whole-class checks.","type":"strength"},{"text":"Asks probing questions to encourage deeper student thinking.","type":"strength"},{"text":"Implement consistent wait time after asking questions.","type":"improvement","technique":"Wait Time"},{"text":"Vary questioning techniques to include non-volunteer responses.","type":"improvement","technique":"Cold Call"}]},{"name":"engagement","label":"Excellent","score":18,"narrative":"Student engagement was consistently high throughout the lesson, driven by hands-on activities and interactive discussions. Students showed genuine interest and enthusiasm, expressing curiosity at the sight of live specimens and actively participating in observations and group tasks.","factors":[{"text":"High levels of student participation in hands-on activities and discussions.","type":"strength"},{"text":"Students demonstrate genuine interest and curiosity in the subject matter.","type":"strength"},{"text":"Ensure all students have an equitable opportunity to share their thoughts.","type":"improvement","technique":"Equitable Participation"},{"text":"Incorporate more opportunities for students to lead discussions.","type":"improvement","technique":"Student-Led Discussion"}]},{"name":"technology","label":"Good","score":3,"narrative":"The teacher effectively used projected images as visual aids to support content, and a student interacted with the projected image at the board. However, there were limited opportunities for students to engage with interactive digital tools or manipulate content dynamically.","factors":[{"text":"Effective use of projected images as visual aids to support content.","type":"strength"},{"text":"Seamless integration of technology without technical disruptions.","type":"strength"},{"text":"Explore opportunities to incorporate more interactive digital tools or simulations.","type":"improvement","technique":"Interactive Digital Tools"},{"text":"Consider having students use technology for research or presentation.","type":"improvement","technique":"Student Technology Use"}]}],"performance_summary":{"key_strengths":[{"text":"Excellent student engagement through hands-on activities","dimension":"Engagement"},{"text":"Clear and accurate scientific explanations","dimension":"Clarity"}],"areas_for_improvement":[{"text":"Behaviour management during transitions needs strengthening","dimension":"Behaviour Management"},{"text":"Technology use is limited to passive projection","dimension":"Technology"}]}}',
+    'gemini-2.5-flash', now() - interval '2 days');
+
+
+-- =============================================================================
+-- 11. INVITATIONS
+-- =============================================================================
+
+INSERT INTO public.invitations (
+  id, school_id, organization_id, email, role,
+  department_name, subject_name, phase_name,
+  invited_by, status, token,
+  sent_at, expires_at, accepted_at, accepted_by,
+  revoked_at, resent_count, last_resent_at,
+  created_at
+) VALUES
+
+  -- pending — standard teacher invite
+  ('00000000-0000-0000-0005-000000000001',
+   '00000000-0000-0000-0000-000000000010', NULL,
+   'new.teacher@example.com', 'teacher',
+   'Science', 'Chemistry', 'KS4',
+   '00000000-0000-0000-0001-000000000002',
+   'pending', 'tok_pending_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+   now(), now() + interval '7 days',
+   NULL, NULL, NULL, 0, NULL, now()),
+
+  -- accepted — corresponds to Eve Rahman
+  ('00000000-0000-0000-0005-000000000002',
+   '00000000-0000-0000-0000-000000000010', NULL,
+   'teacher.bio@learnalyze.dev', 'teacher',
+   'Science', 'Biology', 'KS3',
+   '00000000-0000-0000-0001-000000000002',
+   'accepted', 'tok_accepted_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+   now() - interval '10 days', now() - interval '3 days',
+   now() - interval '8 days', '00000000-0000-0000-0001-000000000005',
+   NULL, 0, NULL, now() - interval '10 days'),
+
+  -- expired — never clicked, resent twice
+  ('00000000-0000-0000-0005-000000000003',
+   '00000000-0000-0000-0000-000000000010', NULL,
+   'ghost.never.came@example.com', 'teacher',
+   'Mathematics', 'Core Maths', 'KS4',
+   '00000000-0000-0000-0001-000000000002',
+   'expired', 'tok_expired_cccccccccccccccccccccccccccccccccc',
+   now() - interval '14 days', now() - interval '7 days',
+   NULL, NULL, NULL, 2, now() - interval '10 days',
+   now() - interval '14 days'),
+
+  -- revoked — head_of_department requires department_name (constraint)
+  ('00000000-0000-0000-0005-000000000004',
+   '00000000-0000-0000-0000-000000000010', NULL,
+   'revoked.hod@example.com', 'head_of_department',
+   'English', NULL, 'Sixth Form',
+   '00000000-0000-0000-0001-000000000002',
+   'revoked', 'tok_revoked_dddddddddddddddddddddddddddddddddd',
+   now() - interval '5 days', now() + interval '2 days',
+   NULL, NULL, now() - interval '2 days',
+   0, NULL, now() - interval '5 days'),
+
+  -- org-level — organization_id set, school_id must be NULL
+  ('00000000-0000-0000-0005-000000000005',
+   NULL, '00000000-0000-0000-0000-000000000001',
+   'new.org.admin@example.com', 'org_admin',
+   NULL, NULL, NULL,
+   '00000000-0000-0000-0001-000000000001',
+   'pending', 'tok_orgadmin_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+   now(), now() + interval '7 days',
+   NULL, NULL, NULL, 0, NULL, now()),
+
+  -- EDGE: standalone school invite — school has no org so organization_id NULL
+  ('00000000-0000-0000-0005-000000000006',
+   '00000000-0000-0000-0000-000000000012', NULL,
+   'another.riverside@example.com', 'teacher',
+   'General Studies', 'Literacy', NULL,
+   '00000000-0000-0000-0001-000000000013',
+   'pending', 'tok_riverside_ffffffffffffffffffffffffffffffffff',
+   now(), now() + interval '7 days',
+   NULL, NULL, NULL, 0, NULL, now());
+
+
+-- =============================================================================
+-- 12. INVITATION GRADES
+-- =============================================================================
+
+INSERT INTO public.invitation_grades (invitation_id, grade_name) VALUES
+  ('00000000-0000-0000-0005-000000000001', 'Year 10'),
+  ('00000000-0000-0000-0005-000000000001', 'Year 11'),
+  ('00000000-0000-0000-0005-000000000002', 'Year 7'),
+  ('00000000-0000-0000-0005-000000000002', 'Year 8'),
+  ('00000000-0000-0000-0005-000000000002', 'Year 9'),
+  ('00000000-0000-0000-0005-000000000006', 'Class 1');
+
+
+-- =============================================================================
+-- 13. NOTIFICATIONS
+-- =============================================================================
+-- notification_tone: info | success | warning | danger | neutral
+
+INSERT INTO public.notifications (
+  id, user_id, kind, tone, title, subtitle, body_md, link, payload,
+  read_at, opened_at, archived_at, created_at
+) VALUES
+
+  ('00000000-0000-0000-0006-000000000001',
+   '00000000-0000-0000-0001-000000000005',
+   'lesson.ready', 'info',
+   'Your lesson is ready', 'Cell Respiration analysis is complete',
+   'Your lesson **Cell Respiration** has been analysed. [View feedback](/lessons/00000000-0000-0000-0003-000000000004).',
+   '/lessons/00000000-0000-0000-0003-000000000004',
+   '{"lesson_id":"00000000-0000-0000-0003-000000000004"}',
+   NULL, NULL, NULL, now() - interval '1 day'),
+
+  ('00000000-0000-0000-0006-000000000002',
+   '00000000-0000-0000-0001-000000000005',
+   'onboarding.complete', 'success',
+   'Setup complete!', 'Your Learnalyze account is ready to go',
+   'Welcome, **Eve**. You can now upload lessons and receive AI feedback.',
+   '/dashboard', '{}',
+   now() - interval '9 days', now() - interval '9 days', NULL,
+   now() - interval '10 days'),
+
+  ('00000000-0000-0000-0006-000000000003',
+   '00000000-0000-0000-0001-000000000002',
+   'invitation.expiring_soon', 'warning',
+   'An invitation is about to expire', 'Invite for ghost.never.came@example.com expires in 24 hours',
+   'The invitation sent to **ghost.never.came@example.com** will expire tomorrow. [Resend now](/invitations/00000000-0000-0000-0005-000000000003).',
+   '/invitations/00000000-0000-0000-0005-000000000003',
+   '{"invitation_id":"00000000-0000-0000-0005-000000000003"}',
+   NULL, NULL, NULL, now() - interval '6 days'),
+
+  ('00000000-0000-0000-0006-000000000004',
+   '00000000-0000-0000-0001-000000000006',
+   'lesson.failed', 'danger',
+   'Lesson processing failed', 'Quadratics — Factorising Practice could not be analysed',
+   'We were unable to process your lesson. The transcription service timed out. Please try re-uploading.',
+   '/lessons/00000000-0000-0000-0003-000000000005',
+   '{"lesson_id":"00000000-0000-0000-0003-000000000005","error":"transcription_timeout"}',
+   NULL, NULL, NULL, now() - interval '4 hours'),
+
+  ('00000000-0000-0000-0006-000000000005',
+   '00000000-0000-0000-0001-000000000005',
+   'system.announcement', 'info',
+   'New feature: Talk Ratio analysis', NULL,
+   'We have added **Talk Ratio** to all lesson analyses — see the breakdown of teacher vs student speech time.',
+   '/changelog', '{}',
+   now() - interval '20 days', now() - interval '20 days', now() - interval '15 days',
+   now() - interval '21 days'),
+
+  ('00000000-0000-0000-0006-000000000006',
+   '00000000-0000-0000-0001-000000000004',
+   'lesson.assigned', 'info',
+   'A lesson has been assigned to you', 'Periodic Table — Group Properties by Eve Rahman',
+   'You have been asked to review a lesson by **Eve Rahman**. [Open lesson](/lessons/00000000-0000-0000-0003-000000000008).',
+   '/lessons/00000000-0000-0000-0003-000000000008',
+   '{"lesson_id":"00000000-0000-0000-0003-000000000008","assigned_by":"00000000-0000-0000-0001-000000000002"}',
+   now() - interval '11 hours', now() - interval '11 hours', NULL,
+   now() - interval '12 hours'),
+
+  -- warning for solo teacher (no-school notification rendering)
+  ('00000000-0000-0000-0006-000000000007',
+   '00000000-0000-0000-0001-000000000010',
+   'onboarding.join_school', 'warning',
+   'Complete your setup', 'You have not yet joined a school',
+   'Your account is active, but you are not linked to a school yet. Ask your admin to send you an invite, or upload lessons as a solo teacher.',
+   '/onboarding/join', '{}',
+   NULL, NULL, NULL, now() - interval '30 minutes'),
+
+  -- neutral nudge (tests neutral tone)
+  ('00000000-0000-0000-0006-000000000008',
+   '00000000-0000-0000-0001-000000000006',
+   'tip.upload_reminder', 'neutral',
+   'Keep the momentum going', 'You have not uploaded a lesson this week',
+   'Regular lesson uploads help build a richer feedback history. [Upload now](/lessons/new).',
+   '/lessons/new', '{}',
+   NULL, NULL, NULL, now() - interval '2 hours');
+
+
+-- =============================================================================
+-- 14. NOTIFICATION EVENTS
+-- =============================================================================
+
+INSERT INTO public.notification_events (
+  id, notification_id, user_id, kind, metadata, created_at
+) VALUES
+  ('00000000-0000-0000-0007-000000000001',
+   '00000000-0000-0000-0006-000000000001', '00000000-0000-0000-0001-000000000005',
+   'delivered', '{"channel":"in_app"}', now() - interval '1 day'),
+
+  ('00000000-0000-0000-0007-000000000002',
+   '00000000-0000-0000-0006-000000000002', '00000000-0000-0000-0001-000000000005',
+   'delivered', '{"channel":"email"}', now() - interval '10 days'),
+  ('00000000-0000-0000-0007-000000000003',
+   '00000000-0000-0000-0006-000000000002', '00000000-0000-0000-0001-000000000005',
+   'opened', '{"channel":"email"}', now() - interval '9 days'),
+
+  ('00000000-0000-0000-0007-000000000004',
+   '00000000-0000-0000-0006-000000000004', '00000000-0000-0000-0001-000000000006',
+   'delivered', '{"channel":"in_app"}', now() - interval '4 hours'),
+  ('00000000-0000-0000-0007-000000000005',
+   '00000000-0000-0000-0006-000000000004', '00000000-0000-0000-0001-000000000006',
+   'dismissed', '{"channel":"in_app"}', now() - interval '3 hours'),
+
+  ('00000000-0000-0000-0007-000000000006',
+   '00000000-0000-0000-0006-000000000006', '00000000-0000-0000-0001-000000000004',
+   'delivered', '{"channel":"in_app"}', now() - interval '12 hours'),
+  ('00000000-0000-0000-0007-000000000007',
+   '00000000-0000-0000-0006-000000000006', '00000000-0000-0000-0001-000000000004',
+   'clicked', '{"channel":"in_app","target":"/lessons/00000000-0000-0000-0003-000000000008"}',
+   now() - interval '11 hours'),
+
+  ('00000000-0000-0000-0007-000000000008',
+   '00000000-0000-0000-0006-000000000007', '00000000-0000-0000-0001-000000000010',
+   'delivered', '{"channel":"in_app"}', now() - interval '30 minutes'),
+
+  ('00000000-0000-0000-0007-000000000009',
+   '00000000-0000-0000-0006-000000000008', '00000000-0000-0000-0001-000000000006',
+   'delivered', '{"channel":"in_app"}', now() - interval '2 hours');
+
+
+-- =============================================================================
+-- 15. ACTION PLANS
+-- =============================================================================
+
+INSERT INTO public.action_plans (
+  id, teacher_id, teacher_name, teacher_email, teacher_avatar_url,
+  focus_area, goal_text, target_date, receive_reminders, status,
+  associated_lesson_id, school_id, created_at, updated_at
+) VALUES
+
+  -- solo teacher: action plan linked to lesson-13 (has full_analysis with 6 dimensions)
+  ('00000000-0000-0000-0008-000000000001',
+   '00000000-0000-0000-0001-000000000010',
+   'Isla Solo', 'solo.teacher@learnalyze.dev', NULL,
+   'Clarity',
+   'Use visual aids and analogies to explain complex scientific concepts more clearly, checking for understanding after each new topic.',
+   NULL, false, 'Active',
+   '00000000-0000-0000-0003-000000000013', NULL,
+   now() - interval '5 days', now() - interval '5 days'),
+
+  -- Eve Rahman: action plan linked to lesson-4
+  ('00000000-0000-0000-0008-000000000002',
+   '00000000-0000-0000-0001-000000000005',
+   'Eve Rahman', 'teacher.bio@learnalyze.dev', NULL,
+   'Engagement',
+   'Increase student-led discussion time by at least 20% in each lesson through structured group activities and turn-and-talk prompts.',
+   now() + interval '14 days', true, 'Active',
+   '00000000-0000-0000-0003-000000000004',
+   '00000000-0000-0000-0000-000000000010',
+   now() - interval '7 days', now() - interval '7 days'),
+
+  -- Finn Okafor: completed action plan
+  ('00000000-0000-0000-0008-000000000003',
+   '00000000-0000-0000-0001-000000000006',
+   'Finn Okafor', 'teacher.maths@learnalyze.dev', NULL,
+   'Lesson Structure',
+   'Open every lesson with a 2-minute retrieval practice quiz to activate prior knowledge before introducing new content.',
+   now() - interval '3 days', false, 'Met',
+   '00000000-0000-0000-0003-000000000006',
+   '00000000-0000-0000-0000-000000000010',
+   now() - interval '21 days', now() - interval '2 days')
+
+ON CONFLICT (id) DO UPDATE SET
+  teacher_name      = EXCLUDED.teacher_name,
+  focus_area        = EXCLUDED.focus_area,
+  goal_text         = EXCLUDED.goal_text,
+  target_date       = EXCLUDED.target_date,
+  receive_reminders = EXCLUDED.receive_reminders,
+  status            = EXCLUDED.status,
+  associated_lesson_id = EXCLUDED.associated_lesson_id,
+  updated_at        = now();
+
+
+-- =============================================================================
+-- END OF SEED
+-- =============================================================================
+--
+-- LOGIN REFERENCE  (password: Password123!)
+-- ─────────────────────────────────────────────────────────────────────────────
+--  EMAIL                               ROLE                CONTEXT
+-- ─────────────────────────────────────────────────────────────────────────────
+--  org.admin@learnalyze.dev            org_admin           Learnalyze Demo Org
+--  admin.northgate@learnalyze.dev      principal           Northgate Academy
+--  admin.southbrook@learnalyze.dev     principal           Southbrook College
+--  hod.science@learnalyze.dev          head_of_department  Science, Northgate
+--  teacher.bio@learnalyze.dev          teacher             Biology / Y7–Y9
+--  teacher.maths@learnalyze.dev        teacher             Maths / Y10–Y12
+--  teacher.history@learnalyze.dev      teacher             History, Southbrook
+--  pending.onboard@learnalyze.dev      (null)              role_pending
+--  solo.teacher@learnalyze.dev         teacher             no school, no org
+--  unplaced.teacher@learnalyze.dev     teacher             Northgate, no dept
+--  nosubject.teacher@learnalyze.dev    teacher             Northgate+Science, no subject
+--  riverside.teacher@learnalyze.dev    teacher             Riverside (standalone)
+-- =============================================================================

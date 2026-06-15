@@ -1,0 +1,51 @@
+// Pure functions — no Flutter imports, no HERE imports.
+// This is the single source for all distance and speed formatting.
+// Every navigation widget reads from here; nothing else ever formats a distance.
+//
+// Units: miles + yards for distance, mph for speed.
+// No km / m / ft output — ever. Not even as a fallback.
+
+abstract final class UkFormatter {
+  static const double _metersPerMile = 1609.344;
+  static const double _yardsPerMeter = 1.09361;
+
+  // 0.1 mi threshold below which we show yards instead of miles.
+  static const double _yardsThresholdMeters = _metersPerMile * 0.1; // ≈ 160.9m
+
+  /// Formats [meters] as a UK driving distance string.
+  ///
+  /// < 0.1 mi → nearest 10 yards, e.g. "170 yards"
+  /// 0.1–9.9 mi → 1 decimal place, e.g. "2.4 mi"
+  /// ≥ 10 mi → nearest half-mile, e.g. "12 mi" or "12.5 mi"
+  static String formatDistance(int meters) {
+    if (meters <= 0) return '0 yards';
+
+    if (meters < _yardsThresholdMeters) {
+      final yards = (meters * _yardsPerMeter / 10).round() * 10;
+      return '$yards yards';
+    }
+
+    final miles = meters / _metersPerMile;
+
+    if (miles < 10.0) {
+      final oneDecimal = (miles * 10).round() / 10;
+      return '$oneDecimal mi';
+    }
+
+    // >= 10 mi: round to nearest 0.5
+    final halfMiles = (miles * 2).round() / 2;
+    if (halfMiles == halfMiles.truncateToDouble()) {
+      return '${halfMiles.toInt()} mi';
+    }
+    return '$halfMiles mi';
+  }
+
+  /// Formats a speed in metres-per-second as mph.
+  ///
+  /// Returns "--" when [speedMs] is null (GPS signal lost).
+  static String formatSpeed(double? speedMs) {
+    if (speedMs == null) return '--';
+    final mph = (speedMs * 2.23694).round();
+    return '$mph mph';
+  }
+}

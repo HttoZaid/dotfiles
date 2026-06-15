@@ -1,0 +1,247 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/navigation/maneuvers/maneuver_icons.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/navigation_phase.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/nav_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/search/nav_search_notifier.dart';
+import 'package:ukcheckpoints_app/features/navigation/sheets/route_checkpoints_section.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/strings.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/uk_formatter.dart';
+
+class NavTripOverviewContent extends ConsumerWidget {
+  const NavTripOverviewContent({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final phase = ref.watch(navStateNotifierProvider);
+    if (phase is! TripOverview) return const SizedBox.shrink();
+
+    final route  = phase.route;
+    final search = ref.watch(navSearchNotifierProvider);
+    final dest   = search.selectedDest;
+
+    final destName    = dest?.title ?? NavStrings.goingToHint;
+    final destAddress = dest?.place?.address.addressText;
+
+    final dur       = route.duration;
+    final hours     = dur.inHours;
+    final mins      = dur.inMinutes.remainder(60);
+    final durationStr = hours > 0 ? '${hours}h ${mins}m' : '$mins min';
+
+    final eta    = DateTime.now().add(dur);
+    final etaStr = TimeOfDay.fromDateTime(eta).format(context);
+
+    final distStr = UkFormatter.formatDistance(route.lengthInMeters);
+
+    // First maneuver from the first section (skip the depart maneuver at idx 0
+    // if the section has more than one — it's always "Depart").
+    final maneuvers = route.sections.firstOrNull?.maneuvers ?? [];
+    final firstTurn = maneuvers.length > 1 ? maneuvers[1] : maneuvers.firstOrNull;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp2,
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp5,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Destination ────────────────────────────────────────────────────
+          Row(
+            children: [
+              const Icon(
+                Icons.location_on,
+                size: 18,
+                color: ThemeColors.accent,
+              ),
+              const SizedBox(width: ThemeSpacing.sp2),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      destName,
+                      style: ThemeText.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (destAddress != null)
+                      Text(
+                        destAddress,
+                        style: ThemeText.subheadline.copyWith(
+                          color: ThemeColors.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: ThemeSpacing.sp4),
+
+          // ── Summary chips ──────────────────────────────────────────────────
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                _InfoChip(
+                  label: NavStrings.arrivalLabel,
+                  value: etaStr,
+                ),
+                const _Divider(),
+                _InfoChip(
+                  label: NavStrings.durationLabel,
+                  value: durationStr,
+                ),
+                const _Divider(),
+                _InfoChip(
+                  label: NavStrings.distanceLabel,
+                  value: distStr,
+                ),
+              ],
+            ),
+          ),
+
+          // ── First turn preview ─────────────────────────────────────────────
+          if (firstTurn != null) ...[
+            const SizedBox(height: ThemeSpacing.sp3),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: ThemeColors.surfaceContainer,
+                borderRadius: ThemeRadius.brSmall,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: ThemeSpacing.sp3,
+                  vertical: ThemeSpacing.sp3,
+                ),
+                child: Row(
+                  children: [
+                    Image.asset(
+                      maneuverIconPath(firstTurn.action),
+                      width:  28,
+                      height: 28,
+                      color:  ThemeColors.textPrimary,
+                    ),
+                    const SizedBox(width: ThemeSpacing.sp3),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            NavStrings.nextTurnLabel,
+                            style: ThemeText.labelSmall.copyWith(
+                              color: ThemeColors.textTertiary,
+                            ),
+                          ),
+                          Text(
+                            firstTurn.text,
+                            style: ThemeText.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: ThemeSpacing.sp2),
+                    Text(
+                      UkFormatter.formatDistance(firstTurn.lengthInMeters),
+                      style: ThemeText.callout.copyWith(
+                        color: ThemeColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: ThemeSpacing.sp4),
+
+          // ── Actions ────────────────────────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () =>
+                      ref.read(navStateNotifierProvider.notifier).closeTrip(),
+                  child: const Text(NavStrings.closeCta),
+                ),
+              ),
+              const SizedBox(width: ThemeSpacing.sp3),
+              Expanded(
+                flex: 2,
+                child: FilledButton(
+                  onPressed: () {
+                    final p = ref.read(navStateNotifierProvider);
+                    if (p is! TripOverview) return;
+                    ref
+                        .read(navStateNotifierProvider.notifier)
+                        .startDrive(p.route);
+                  },
+                  child: const Text(NavStrings.startDriveCta),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: ThemeSpacing.sp4),
+
+          // ── Route checkpoints ───────────────────────────────────────────────
+          const RouteCheckpointsSection(),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Sub-widgets ────────────────────────────────────────────────────────────
+
+class _InfoChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoChip({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            value,
+            style: ThemeText.titleMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            label,
+            style: ThemeText.labelSmall.copyWith(
+              color: ThemeColors.textTertiary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Divider extends StatelessWidget {
+  const _Divider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 1,
+      height: 36,
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: ThemeColors.border),
+      ),
+    );
+  }
+}

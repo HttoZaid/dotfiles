@@ -1,0 +1,126 @@
+import 'dart:math' show sin, cos, sqrt, atan2, pi;
+
+import 'package:flutter/foundation.dart' show compute;
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+
+// ── Public result type ─────────────────────────────────────────────────────
+
+class RouteCheckpointResult {
+  final String checkpointId;
+
+  /// Cumulative distance from route start to the checkpoint's closest
+  /// projection onto the route polyline, in metres.
+  final int distanceAlongRouteMeters;
+
+  const RouteCheckpointResult({
+    required this.checkpointId,
+    required this.distanceAlongRouteMeters,
+  });
+}
+
+// ── Public entry-point ─────────────────────────────────────────────────────
+
+/// Runs off the UI thread via [compute].
+/// Returns checkpoints within [radiusMeters] of the route, sorted by
+/// distance along the route (nearest to start first).
+Future<List<RouteCheckpointResult>> filterRouteCheckpoints(
+  List<(double, double)> routeVertices,
+  List<Checkpoint> checkpoints, {
+  double radiusMeters = 300,
+}) =>
+    compute(
+      _filterIsolate,
+      _FilterInput(
+        vertices: routeVertices,
+        checkpoints: checkpoints
+            .map((c) => (c.id, c.latitude.toDouble(), c.longitude.toDouble()))
+            .toList(),
+        radiusMeters: radiusMeters,
+      ),
+    );
+
+// ── Isolate-safe types (no FFI / platform channels) ───────────────────────
+
+class _FilterInput {
+  final List<(double, double)> vertices;
+  final List<(String, double, double)> checkpoints; // (id, lat, lng)
+  final double radiusMeters;
+
+  const _FilterInput({
+    required this.vertices,
+    required this.checkpoints,
+    required this.radiusMeters,
+  });
+}
+
+List<RouteCheckpointResult> _filterIsolate(_FilterInput input) {
+  final vertices = input.vertices;
+  if (vertices.length < 2) return [];
+
+  final results = <RouteCheckpointResult>[];
+
+  for (final (id, pLat, pLng) in input.checkpoints) {
+    double minDist = double.infinity;
+    double bestCum = 0;
+    double cum = 0;
+
+    for (int i = 0; i < vertices.length - 1; i++) {
+      final (aLat, aLng) = vertices[i];
+      final (bLat, bLng) = vertices[i + 1];
+      final segLen = _haversine(aLat, aLng, bLat, bLng);
+      final (:dist, :frac) = _ptToSeg(pLat, pLng, aLat, aLng, bLat, bLng);
+      if (dist < minDist) {
+        minDist = dist;
+        bestCum = cum + frac * segLen;
+      }
+      cum += segLen;
+    }
+
+    if (minDist <= input.radiusMeters) {
+      results.add(RouteCheckpointResult(
+        checkpointId: id,
+        distanceAlongRouteMeters: bestCum.round(),
+      ));
+    }
+  }
+
+  results.sort(
+    (a, b) => a.distanceAlongRouteMeters.compareTo(b.distanceAlongRouteMeters),
+  );
+  return results;
+}
+
+// ── Pure geometry helpers (no SDK, isolate-safe) ───────────────────────────
+
+double _haversine(double lat1, double lng1, double lat2, double lng2) {
+  const r = 6371000.0;
+  final phi1 = lat1 * pi / 180;
+  final phi2 = lat2 * pi / 180;
+  final dPhi = (lat2 - lat1) * pi / 180;
+  final dLam = (lng2 - lng1) * pi / 180;
+  final a = sin(dPhi / 2) * sin(dPhi / 2) +
+      cos(phi1) * cos(phi2) * sin(dLam / 2) * sin(dLam / 2);
+  return r * 2 * atan2(sqrt(a), sqrt(1 - a));
+}
+
+({double dist, double frac}) _ptToSeg(
+  double pLat,
+  double pLng,
+  double aLat,
+  double aLng,
+  double bLat,
+  double bLng,
+) {
+  final dx = bLng - aLng;
+  final dy = bLat - aLat;
+  final lenSq = dx * dx + dy * dy;
+  if (lenSq == 0) {
+    return (dist: _haversine(pLat, pLng, aLat, aLng), frac: 0);
+  }
+  final t = ((pLng - aLng) * dx + (pLat - aLat) * dy) / lenSq;
+  final tc = t.clamp(0.0, 1.0);
+  return (
+    dist: _haversine(pLat, pLng, aLat + tc * dy, aLng + tc * dx),
+    frac: tc,
+  );
+}

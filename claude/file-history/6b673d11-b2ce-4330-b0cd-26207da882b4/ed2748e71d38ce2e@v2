@@ -1,0 +1,27 @@
+import { escHtml, renderTemplate } from "../_lib/render";
+
+export type WelcomeEmailArgs = {
+  to: string;
+  displayName: string;
+  role: string;
+  schoolName?: string;
+  dashboardLink: string;
+};
+
+export async function buildWelcomeEmail(
+  args: WelcomeEmailArgs,
+): Promise<{ subject: string; html: string }> {
+  const html = await renderTemplate("welcome", {
+    display_name: escHtml(args.displayName),
+    role: escHtml(args.role),
+    school_row: args.schoolName
+      ? `<p style="margin:0 0 4px;font-size:13px;color:#78716c">at <strong style="color:#1c1917">${escHtml(args.schoolName)}</strong></p>`
+      : "",
+    dashboard_link: args.dashboardLink,
+  });
+
+  return {
+    subject: `Welcome to Learnalyze, ${args.displayName}`,
+    html,
+  };
+}

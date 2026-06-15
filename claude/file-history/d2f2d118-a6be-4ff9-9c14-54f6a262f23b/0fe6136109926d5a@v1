@@ -1,0 +1,55 @@
+import {
+    formatDistance,
+    formatDuration,
+    formatEta,
+} from "@/features/navigation/lib/format-route";
+import type { RouteSummary } from "expo-here-maps";
+import { Navigation, X } from "lucide-react-native";
+import { Pressable, Text, View } from "react-native";
+import Animated, { FadeInUp } from "react-native-reanimated";
+
+type RouteSummaryCardProps = {
+	summary: RouteSummary;
+	onStart: () => void;
+	onClear: () => void;
+};
+
+export function RouteSummaryCard({
+	summary,
+	onStart,
+	onClear,
+}: RouteSummaryCardProps) {
+	return (
+		<Animated.View entering={FadeInUp.duration(240)} className="gap-4">
+			<View className="flex-row items-center justify-between rounded-3xl border border-border bg-card px-5 py-4">
+				<View>
+					<Text className="text-[26px] font-bold leading-tight text-foreground">
+						{formatDuration(summary.durationSeconds)}
+					</Text>
+					<Text className="text-[15px] text-muted-foreground">
+						{formatDistance(summary.distanceMeters)} · Arrive{" "}
+						{formatEta(summary.durationSeconds)}
+					</Text>
+				</View>
+				<Pressable onPress={onClear} hitSlop={10} className="active:opacity-50">
+					<View className="h-9 w-9 items-center justify-center rounded-full bg-muted">
+						<X size={18} className="text-muted-foreground" strokeWidth={2.5} />
+					</View>
+				</Pressable>
+			</View>
+
+			<Pressable onPress={onStart} className="active:opacity-90">
+				<View className="flex-row items-center justify-center gap-2 rounded-2xl bg-primary py-4">
+					<Navigation
+						size={20}
+						className="text-primary-foreground"
+						fill="currentColor"
+					/>
+					<Text className="text-base font-semibold text-primary-foreground">
+						Start
+					</Text>
+				</View>
+			</Pressable>
+		</Animated.View>
+	);
+}

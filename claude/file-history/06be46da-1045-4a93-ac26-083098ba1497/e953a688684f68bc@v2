@@ -1,0 +1,65 @@
+import 'package:flutter/material.dart';
+import 'package:here_sdk/search.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+
+class SuggestionRow extends StatelessWidget {
+  final Suggestion suggestion;
+  final VoidCallback onTap;
+
+  const SuggestionRow({
+    required this.suggestion,
+    required this.onTap,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = suggestion.place?.address.addressText;
+    final hasSubtitle = subtitle != null && subtitle.isNotEmpty;
+
+    final icon = switch (suggestion.type) {
+      SuggestionType.chain    => Icons.storefront_outlined,
+      SuggestionType.category => Icons.category_outlined,
+      _                       => Icons.location_on_outlined,
+    };
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: ThemeSpacing.sp4,
+          vertical: ThemeSpacing.sp3,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: ThemeColors.textTertiary),
+            const SizedBox(width: ThemeSpacing.sp3),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    suggestion.title,
+                    style: ThemeText.callout,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (hasSubtitle) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: ThemeText.subheadline,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

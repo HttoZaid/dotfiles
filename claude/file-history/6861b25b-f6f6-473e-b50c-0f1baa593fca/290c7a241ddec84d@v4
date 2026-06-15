@@ -1,0 +1,91 @@
+import { useSheet } from "@/components/ui/sheet";
+import { useRouteState } from "@/features/navigation/route-context";
+import { formatDistance, formatDuration, formatEta } from "@/features/navigation/lib/format-route";
+import { Search, X } from "lucide-react-native";
+import { useEffect } from "react";
+import { Pressable, Text, View } from "react-native";
+import Animated, {
+	Extrapolation,
+	interpolate,
+	useAnimatedStyle,
+	useSharedValue,
+	withTiming,
+} from "react-native-reanimated";
+
+/* Google Maps / Uber nav peek — duration is the hero, everything else secondary */
+function NavPeek() {
+	const { etaSeconds, remainingMeters, totalMeters, stopNavigation } = useRouteState();
+
+	const progress =
+		totalMeters != null && remainingMeters != null
+			? Math.max(0, Math.min(1, 1 - remainingMeters / totalMeters))
+			: 0;
+
+	const progressAnim = useSharedValue(progress);
+
+	useEffect(() => {
+		progressAnim.value = withTiming(progress, { duration: 1000 });
+	}, [progress, progressAnim]);
+
+	const barStyle = useAnimatedStyle(() => ({
+		width: `${interpolate(progressAnim.value, [0, 1], [0, 100], Extrapolation.CLAMP)}%`,
+	}));
+
+	return (
+		<View className="gap-3">
+			{/* Uber-style progress track — slightly thicker, more visible */}
+			<View className="h-[3px] w-full overflow-hidden rounded-full bg-muted">
+				<Animated.View style={barStyle} className="h-full rounded-full bg-primary" />
+			</View>
+
+			<View className="flex-row items-end justify-between">
+				{/* Duration is king — Uber/Google both make this massive */}
+				<View className="gap-0.5">
+					<Text className="text-[32px] font-bold leading-none tracking-tight text-foreground">
+						{etaSeconds != null ? formatDuration(etaSeconds) : "—"}
+					</Text>
+					<Text className="text-[13px] text-muted-foreground">
+						{[
+							remainingMeters != null ? formatDistance(remainingMeters) : null,
+							etaSeconds != null ? `Arrive ${formatEta(etaSeconds)}` : null,
+						]
+							.filter(Boolean)
+							.join("  ·  ")}
+					</Text>
+				</View>
+
+				{/* Stop — subtle destructive circle, not a big red button */}
+				<Pressable onPress={stopNavigation} hitSlop={14} className="active:opacity-60">
+					<View className="h-11 w-11 items-center justify-center rounded-full bg-destructive/10">
+						<X size={18} className="text-destructive" strokeWidth={2.5} />
+					</View>
+				</Pressable>
+			</View>
+		</View>
+	);
+}
+
+/* Apple Maps / Google Maps search pill — elevated, clean, minimal */
+export function SheetSearchDecoy() {
+	const { expand } = useSheet();
+	const { phase } = useRouteState();
+
+	if (phase === "navigating") {
+		return <NavPeek />;
+	}
+
+	return (
+		<Pressable onPress={expand} className="active:opacity-80">
+			<View className="flex-row items-center gap-3 rounded-2xl bg-card px-4 py-4 shadow-md border border-border/50">
+				<View className="h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+					<Search size={17} className="text-primary" strokeWidth={2.5} />
+				</View>
+				<Text className="flex-1 text-[17px] font-medium tracking-tight text-foreground">
+					Where to?
+				</Text>
+				{/* GPS active dot — like Apple Maps green dot */}
+				<View className="h-2 w-2 rounded-full bg-success" />
+			</View>
+		</Pressable>
+	);
+}

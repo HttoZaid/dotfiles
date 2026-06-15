@@ -1,0 +1,39 @@
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+
+// Keep in sync with GpsChannel.CHANNEL_NAME in Kotlin.
+// TODO: replace "com.example" with your real reverse domain before Play Store.
+const _kChannelName = 'com.example.ukcheckpoints_app/gps';
+
+/// Streams raw GPS fixes from Android's [LocationManager.GPS_PROVIDER].
+///
+/// [intervalMs] is passed as a hint to the GPS hardware. 200 ms (5 Hz) works
+/// well on high-end chips (Snapdragon 8 Gen 2, etc.). If the chip only
+/// supports 1 Hz the stream will still emit — just at 1 Hz.
+///
+/// Android-only. Throws [UnsupportedError] if called on other platforms.
+Stream<Position> gpsStream({int intervalMs = 200}) {
+  return const EventChannel(_kChannelName)
+      .receiveBroadcastStream({'intervalMs': intervalMs})
+      .map(_toPosition);
+}
+
+Position _toPosition(dynamic raw) {
+  final m = Map<String, dynamic>.from(raw as Map);
+  return Position(
+    latitude: (m['latitude'] as num).toDouble(),
+    longitude: (m['longitude'] as num).toDouble(),
+    timestamp: DateTime.fromMillisecondsSinceEpoch(
+      (m['time'] as num).toInt(),
+      isUtc: true,
+    ),
+    accuracy: (m['accuracy'] as num).toDouble(),
+    altitude: (m['altitude'] as num).toDouble(),
+    altitudeAccuracy: 0.0,
+    heading: (m['heading'] as num).toDouble(),
+    headingAccuracy: 0.0,
+    speed: (m['speed'] as num).toDouble(),
+    speedAccuracy: 0.0,
+    isMocked: m['isMocked'] as bool,
+  );
+}

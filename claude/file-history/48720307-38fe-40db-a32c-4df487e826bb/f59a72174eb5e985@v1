@@ -1,0 +1,174 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+
+class MapSearchBar extends ConsumerStatefulWidget {
+  final void Function(Checkpoint) onCheckpointSelected;
+
+  const MapSearchBar({required this.onCheckpointSelected, super.key});
+
+  @override
+  ConsumerState<MapSearchBar> createState() => _MapSearchBarState();
+}
+
+class _MapSearchBarState extends ConsumerState<MapSearchBar> {
+  final _controller = TextEditingController();
+  bool _isFocused = false;
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(() {
+      setState(() {
+        _isFocused = _focusNode.hasFocus;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final search = ref.watch(checkpointSearchProvider);
+    final results = ref.watch(filteredCheckpointsProvider);
+
+    return Column(
+      children: [
+        Container(
+          margin: EdgeInsets.fromLTRB(
+            ThemeSpacing.sp4,
+            MediaQuery.of(context).padding.top + ThemeSpacing.sp4,
+            ThemeSpacing.sp4,
+            0,
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: ThemeSpacing.sp3,
+            vertical: ThemeSpacing.sp2,
+          ),
+          child: TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            style: ThemeText.body,
+            decoration: InputDecoration(
+              hintText: 'Search checkpoints...',
+              hintStyle: ThemeText.body.copyWith(
+                color: ThemeColors.textTertiary,
+              ),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: ThemeSpacing.sp2,
+              ),
+              isDense: true,
+              prefixIcon: const Icon(
+                Icons.search,
+                color: ThemeColors.accent,
+                size: 22,
+              ),
+              suffixIcon:
+                  search.isNotEmpty
+                      ? IconButton(
+                        icon: const Icon(Icons.clear, size: 20),
+                        onPressed: () {
+                          _controller.clear();
+                          ref
+                              .read(checkpointSearchProvider.notifier)
+                              .update('');
+                        },
+                      )
+                      : null,
+            ),
+            onChanged:
+                (value) =>
+                    ref.read(checkpointSearchProvider.notifier).update(value),
+          ),
+        ),
+
+        if (_isFocused && search.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.symmetric(
+              horizontal: ThemeSpacing.sp4,
+              vertical: ThemeSpacing.sp2,
+            ),
+            decoration: BoxDecoration(
+              color: ThemeColors.bgRaised,
+              borderRadius: ThemeRadius.brLg,
+              boxShadow: ThemeShadows.md,
+              border: Border.all(color: ThemeColors.border),
+            ),
+            child: results.when(
+              data:
+                  (data) => ListView.builder(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    itemCount:
+                        data.checkpoints.length > 5
+                            ? 5
+                            : data.checkpoints.length,
+                    itemBuilder: (context, index) {
+                      final checkpoint = data.checkpoints[index];
+                      final status =
+                          checkpoint.contributions.isNotEmpty
+                              ? checkpoint.contributions.first.status
+                              : null;
+                      return ListTile(
+                        title: Text(checkpoint.name, style: ThemeText.callout),
+                        leading: _StatusIcon(status: status),
+                        onTap: () {
+                          _focusNode.unfocus();
+                          widget.onCheckpointSelected(checkpoint);
+                        },
+                      );
+                    },
+                  ),
+              loading:
+                  () => const Padding(
+                    padding: EdgeInsets.all(ThemeSpacing.sp4),
+                    child: CupertinoActivityIndicator(),
+                  ),
+              error:
+                  (e, st) => const Padding(
+                    padding: EdgeInsets.all(ThemeSpacing.sp4),
+                    child: Text('Could not load checkpoints. Please try again.'),
+                  ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StatusIcon extends StatelessWidget {
+  final ContributionStatusEnum? status;
+
+  const _StatusIcon({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, IconData icon) = switch (status) {
+      ContributionStatusEnum.ACTIVE => (
+        ThemeColors.danger,
+        CupertinoIcons.dot_radiowaves_right,
+      ),
+      ContributionStatusEnum.INACTIVE => (
+        const Color(0xFF34C759),
+        CupertinoIcons.checkmark_shield_fill,
+      ),
+      ContributionStatusEnum.POLICE_ALERT => (
+        const Color(0xFFFF9500),
+        CupertinoIcons.exclamationmark_triangle_fill,
+      ),
+      _ => (ThemeColors.stone300, CupertinoIcons.question_circle_fill),
+    };
+
+    return Icon(icon, color: color, size: 20);
+  }
+}

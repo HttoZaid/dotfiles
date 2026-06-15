@@ -1,0 +1,150 @@
+import { useRouteSearch } from "@/features/navigation/hooks/use-route-search";
+import type { GeoJsonFeature, HereMapsViewRef } from "expo-here-maps";
+import { ArrowUpDown, Navigation } from "lucide-react-native";
+import type { RefObject } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import Animated, { FadeIn, FadeInUp, LinearTransition } from "react-native-reanimated";
+import { RoutePointField } from "./RoutePointField";
+import { RouteSummaryCard } from "./RouteSummaryCard";
+import { SearchResultRow } from "./SearchResultRow";
+
+type SheetSearchProps = {
+	mapRef: RefObject<HereMapsViewRef | null>;
+};
+
+export function SheetSearch({ mapRef }: SheetSearchProps) {
+	const {
+		query,
+		setQuery,
+		results,
+		isLoading,
+		hasSearched,
+		origin,
+		destination,
+		active,
+		canRoute,
+		routeSummary,
+		editField,
+		selectResult,
+		setFieldToCurrent,
+		clearField,
+		swap,
+		confirmRoute,
+		startNavigation,
+		clearRoute,
+	} = useRouteSearch(mapRef);
+
+	const hasResults = results.length > 0;
+	const showEmpty = hasSearched && !isLoading && !hasResults && !routeSummary;
+	const canSwap = !!destination || !origin.isCurrentLocation;
+	const showDirections = canRoute && active === null && !routeSummary;
+
+	const originValue =
+		active === "origin"
+			? query
+			: origin.isCurrentLocation
+				? "Current location"
+				: origin.label;
+
+	const destinationValue =
+		active === "destination" ? query : (destination?.label ?? "");
+
+	return (
+		<View className="flex-1 gap-7">
+			<View className="flex-row items-stretch">
+				<View className="w-7 items-center justify-center py-5">
+					<View className="h-3 w-3 rounded-full border-[2.5px] border-muted-foreground" />
+					<View className="my-2 w-0.5 flex-1 rounded-full bg-border" />
+					<View className="h-3 w-3 rounded-[3px] bg-primary" />
+				</View>
+
+				<View className="flex-1 overflow-hidden rounded-3xl border border-border bg-card">
+					<RoutePointField
+						value={originValue}
+						active={active === "origin"}
+						isCurrentLocation={origin.isCurrentLocation && active !== "origin"}
+						canUseLocation={active === "origin" && !origin.isCurrentLocation}
+						onChangeText={setQuery}
+						onFocus={() => editField("origin")}
+						onUseLocation={() => setFieldToCurrent("origin")}
+						onClear={() => clearField("origin")}
+						placeholder="Choose start"
+					/>
+					<View className="ml-4 h-px bg-border" />
+					<RoutePointField
+						value={destinationValue}
+						active={active === "destination"}
+						isCurrentLocation={
+							destination?.isCurrentLocation === true && active !== "destination"
+						}
+						canUseLocation={active === "destination"}
+						onChangeText={setQuery}
+						onFocus={() => editField("destination")}
+						onUseLocation={() => setFieldToCurrent("destination")}
+						onClear={() => clearField("destination")}
+						placeholder="Where to?"
+					/>
+				</View>
+
+				<View className="w-12 items-center justify-center">
+					<Pressable
+						onPress={swap}
+						disabled={!canSwap}
+						hitSlop={10}
+						className={canSwap ? "active:opacity-50" : "opacity-30"}
+					>
+						<View className="h-10 w-10 items-center justify-center rounded-full border border-border bg-background">
+							<ArrowUpDown size={17} className="text-foreground" strokeWidth={2.25} />
+						</View>
+					</Pressable>
+				</View>
+			</View>
+
+			{routeSummary ? (
+				<RouteSummaryCard
+					summary={routeSummary}
+					onStart={startNavigation}
+					onClear={clearRoute}
+				/>
+			) : null}
+
+			{showDirections ? (
+				<Animated.View entering={FadeInUp.duration(220)}>
+					<Pressable onPress={confirmRoute} className="active:opacity-90">
+						<View className="flex-row items-center justify-center gap-2 rounded-2xl bg-primary py-4">
+							<Navigation size={19} className="text-primary-foreground" fill="currentColor" />
+							<Text className="text-base font-semibold text-primary-foreground">
+								Get directions
+							</Text>
+						</View>
+					</Pressable>
+				</Animated.View>
+			) : null}
+
+			{isLoading ? (
+				<View className="items-center py-8">
+					<ActivityIndicator size="small" />
+				</View>
+			) : null}
+
+			{hasResults && !routeSummary ? (
+				<Animated.View layout={LinearTransition.duration(220)} className="gap-3">
+					{results.map((feature: GeoJsonFeature) => (
+						<SearchResultRow
+							key={feature.properties.placeId}
+							feature={feature}
+							onPress={() => selectResult(feature)}
+						/>
+					))}
+				</Animated.View>
+			) : null}
+
+			{showEmpty ? (
+				<Animated.View entering={FadeIn.duration(220)} className="items-center gap-1.5 py-14">
+					<Text className="text-lg font-semibold text-foreground">No places found</Text>
+					<Text className="text-[15px] text-muted-foreground">Try a different search</Text>
+				</Animated.View>
+			) : null}
+		</View>
+	);
+}

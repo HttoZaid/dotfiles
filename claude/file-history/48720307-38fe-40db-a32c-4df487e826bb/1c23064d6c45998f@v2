@@ -1,0 +1,529 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/auth/providers/auth_controller.dart';
+import 'package:ukcheckpoints_app/features/profile/providers/profile_controller.dart';
+import 'package:ukcheckpoints_app/features/profile/widgets/contribution_graph_widget.dart';
+import 'package:ukcheckpoints_app/features/profile/widgets/profile_shimmer_widget.dart';
+import 'package:ukcheckpoints_app/features/profile/widgets/referral_code_item_widget.dart';
+import 'package:ukcheckpoints_app/features/profile/widgets/referral_list_widget.dart';
+
+class ProfileScreen extends ConsumerWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final authState = ref.watch(authControllerProvider);
+
+    return Scaffold(
+      backgroundColor: ThemeColors.bg,
+      body: authState.when(
+        loading: () => const SafeArea(child: ProfileShimmer()),
+        error: (err, _) => Center(child: Text(err.toString())),
+        data: (user) {
+          if (user == null) return const SizedBox.shrink();
+          final profile = user.profile;
+
+          return SafeArea(
+            child: CustomScrollView(
+              physics: const BouncingScrollPhysics(),
+              slivers: [
+                SliverAppBar(
+                  floating: true,
+                  backgroundColor: ThemeColors.bg,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  centerTitle: false,
+                  automaticallyImplyLeading: false,
+                  title: const Text(
+                    'Profile',
+                    style: TextStyle(
+                      fontFamily: ThemeFonts.ui,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.5,
+                      color: ThemeColors.textPrimary,
+                    ),
+                  ),
+                  actions: [
+                    IconButton(
+                      onPressed: () => context.push('/settings'),
+                      tooltip: 'Settings',
+                      icon: const Icon(
+                        Icons.settings_outlined,
+                        color: ThemeColors.stone600,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: ThemeSpacing.sp2),
+                  ],
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: ThemeSpacing.sp4,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      _ProfileHeader(
+                        userName: profile.userName,
+                        avatarUrl: profile.avatarUrl,
+                        joinDate: profile.createdAt,
+                      ),
+                      const SizedBox(height: ThemeSpacing.sp4),
+                      _MembershipCard(
+                        status: profile.subscription.status?.name ?? 'inactive',
+                        expiry: profile.subscription.periodEndDate,
+                      ),
+                      const SizedBox(height: ThemeSpacing.sp4),
+                      _StatRow(
+                        total: profile.stats.totalContributions.toInt(),
+                        streak: profile.stats.contributionStreak.toInt(),
+                        today: profile.stats.today.toInt(),
+                      ),
+                      const SizedBox(height: ThemeSpacing.sp4),
+                      const _EyebrowLabel('Weekly activity'),
+                      const SizedBox(height: ThemeSpacing.sp2),
+                      ContributionGraph(
+                        contributions: profile.stats.last7Days.toList(),
+                      ),
+                      const SizedBox(height: ThemeSpacing.sp5),
+                      const _EyebrowLabel('Referrals'),
+                      const SizedBox(height: ThemeSpacing.sp2),
+                      const _ReferralSection(),
+                      ReferralList(
+                        referrals: profile.stats.referralsMade.toList(),
+                      ),
+                      const SizedBox(height: ThemeSpacing.sp16),
+                    ]),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Header ───────────────────────────────────────────────────
+
+class _ProfileHeader extends StatelessWidget {
+  final String userName;
+  final String avatarUrl;
+  final DateTime joinDate;
+
+  const _ProfileHeader({
+    required this.userName,
+    required this.avatarUrl,
+    required this.joinDate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _Avatar(url: avatarUrl, name: userName),
+        const SizedBox(width: ThemeSpacing.sp4),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                userName,
+                style: const TextStyle(
+                  fontFamily: ThemeFonts.ui,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                  color: ThemeColors.textPrimary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Member since ${DateFormat('MMMM yyyy').format(joinDate)}',
+                style: const TextStyle(
+                  fontFamily: ThemeFonts.ui,
+                  fontSize: 13,
+                  color: ThemeColors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  final String url;
+  final String name;
+
+  const _Avatar({required this.url, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: ThemeColors.accentSubtle,
+      ),
+      child: ClipOval(
+        child: Image.network(
+          url,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => Center(
+            child: Text(
+              name.isNotEmpty ? name[0].toUpperCase() : '?',
+              style: const TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                color: ThemeColors.accent,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Membership card ──────────────────────────────────────────
+
+class _MembershipCard extends StatelessWidget {
+  final String status;
+  final DateTime? expiry;
+
+  const _MembershipCard({required this.status, this.expiry});
+
+  @override
+  Widget build(BuildContext context) {
+    final statusLower = status.toLowerCase();
+    final isActive = statusLower == 'active' || statusLower == 'trialing';
+    final stripColor = isActive ? ThemeColors.accent : ThemeColors.danger;
+    final badgeColor = isActive ? ThemeColors.accent : ThemeColors.danger;
+    final badgeBg =
+        isActive ? ThemeColors.accentSubtle : ThemeColors.dangerSubtle;
+    final badgeLabel = isActive ? 'Active' : 'Inactive';
+    final expiryLabel = expiry != null && isActive
+        ? 'Renews ${DateFormat('d MMM yyyy').format(expiry!)}'
+        : isActive
+        ? 'Active subscription'
+        : 'No active plan';
+
+    return ClipRRect(
+      borderRadius: ThemeRadius.brLg,
+      child: Container(
+        decoration: BoxDecoration(
+          color: ThemeColors.bgRaised,
+          borderRadius: ThemeRadius.brLg,
+          border: Border.all(color: ThemeColors.border),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 3, color: stripColor),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: ThemeSpacing.sp4,
+                    vertical: ThemeSpacing.sp3,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text(
+                              'Membership',
+                              style: TextStyle(
+                                fontFamily: ThemeFonts.ui,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: ThemeColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              expiryLabel,
+                              style: const TextStyle(
+                                fontFamily: ThemeFonts.ui,
+                                fontSize: 12,
+                                color: ThemeColors.textTertiary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          borderRadius: ThemeRadius.brFull,
+                        ),
+                        child: Text(
+                          badgeLabel,
+                          style: TextStyle(
+                            fontFamily: ThemeFonts.ui,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: badgeColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Stats ────────────────────────────────────────────────────
+
+class _StatRow extends StatelessWidget {
+  final int total;
+  final int streak;
+  final int today;
+
+  const _StatRow({
+    required this.total,
+    required this.streak,
+    required this.today,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: ThemeColors.bgRaised,
+        borderRadius: ThemeRadius.brLg,
+        border: Border.all(color: ThemeColors.border),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            Expanded(child: _StatCell(value: total.toString(), label: 'Total')),
+            Container(width: 1, color: ThemeColors.border),
+            Expanded(
+              child: _StatCell(value: '$streak d', label: 'Streak'),
+            ),
+            Container(width: 1, color: ThemeColors.border),
+            Expanded(child: _StatCell(value: today.toString(), label: 'Today')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatCell extends StatelessWidget {
+  final String value;
+  final String label;
+
+  const _StatCell({required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: ThemeSpacing.sp4),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              fontFamily: ThemeFonts.ui,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
+              color: ThemeColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: ThemeFonts.ui,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: ThemeColors.stone400,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Section label ────────────────────────────────────────────
+
+class _EyebrowLabel extends StatelessWidget {
+  final String text;
+  const _EyebrowLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontFamily: ThemeFonts.ui,
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.4,
+        color: ThemeColors.stone400,
+      ),
+    );
+  }
+}
+
+// ─── Referral section ─────────────────────────────────────────
+
+class _ReferralSection extends ConsumerWidget {
+  const _ReferralSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(profileControllerProvider);
+
+    return state.when(
+      loading: () => const SizedBox(
+        height: 60,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: ThemeColors.accent,
+            ),
+          ),
+        ),
+      ),
+      error: (err, _) => const Padding(
+        padding: EdgeInsets.only(bottom: ThemeSpacing.sp3),
+        child: Text(
+          'Could not load referral codes.',
+          style: TextStyle(
+            fontFamily: ThemeFonts.ui,
+            fontSize: 13,
+            color: ThemeColors.danger,
+          ),
+        ),
+      ),
+      data: (codes) {
+        if (codes.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: ThemeSpacing.sp3),
+            child: _CreateReferralRow(
+              onTap: () => ref
+                  .read(profileControllerProvider.notifier)
+                  .createReferralCode(),
+            ),
+          );
+        }
+        return Column(
+          children: [
+            for (final c in codes) ...[
+              ReferralCodeItem(code: c.code),
+              const SizedBox(height: ThemeSpacing.sp2),
+            ],
+            const SizedBox(height: ThemeSpacing.sp3),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CreateReferralRow extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CreateReferralRow({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: ThemeColors.bgRaised,
+      borderRadius: ThemeRadius.brLg,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: ThemeRadius.brLg,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: ThemeSpacing.sp4,
+            vertical: ThemeSpacing.sp4,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: ThemeRadius.brLg,
+            border: Border.all(color: ThemeColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: ThemeColors.accentSubtle,
+                  borderRadius: ThemeRadius.brMd,
+                ),
+                child: const Icon(
+                  Icons.add_rounded,
+                  size: 19,
+                  color: ThemeColors.accent,
+                ),
+              ),
+              const SizedBox(width: ThemeSpacing.sp3),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Create a referral code',
+                      style: TextStyle(
+                        fontFamily: ThemeFonts.ui,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: ThemeColors.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      'Invite friends to join the network',
+                      style: TextStyle(
+                        fontFamily: ThemeFonts.ui,
+                        fontSize: 12,
+                        color: ThemeColors.textTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 12,
+                color: ThemeColors.stone300,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

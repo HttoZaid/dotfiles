@@ -1,0 +1,109 @@
+import { createClient } from "@/lib/supabase/server";
+import { pushNotification } from "@/features/notifications/_lib/push";
+import { email } from "@/features/email";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
+
+const bodySchema = z.object({
+  lesson_id: z.string().min(1),
+  status: z.enum(["ready", "failed"]),
+  secret: z.string().min(1),
+});
+
+export async function POST(req: NextRequest): Promise<Response> {
+  const expectedSecret = process.env.ANALYSIS_WEBHOOK_SECRET;
+  if (!expectedSecret) {
+    return Response.json({ ok: false, kind: "server_error" }, { status: 500 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ ok: false, kind: "validation" }, { status: 400 });
+  }
+
+  const parsed = bodySchema.safeParse(body);
+  if (!parsed.success) {
+    return Response.json({ ok: false, kind: "validation" }, { status: 400 });
+  }
+
+  const { lesson_id, status, secret } = parsed.data;
+
+  if (secret !== expectedSecret) {
+    return Response.json({ ok: false, kind: "forbidden" }, { status: 403 });
+  }
+
+  const supabase = await createClient();
+
+  const { data: lesson, error: fetchError } = await supabase
+    .from("lessons")
+    .select("id, uploaded_by, title, status")
+    .eq("id", lesson_id)
+    .maybeSingle();
+
+  if (fetchError || !lesson) {
+    return Response.json({ ok: false, kind: "not_found" }, { status: 404 });
+  }
+
+  if (lesson.status === status) {
+    return Response.json({ ok: true, data: { lesson_id, status: "already_set" } });
+  }
+
+  const { error: updateError } = await supabase
+    .from("lessons")
+    .update({ status })
+    .eq("id", lesson_id);
+
+  if (updateError) {
+    console.error("analysis-complete webhook update failed", {
+      lessonId: lesson_id,
+      status,
+      error: updateError,
+    });
+    return Response.json({ ok: false, kind: "server_error" }, { status: 500 });
+  }
+
+  if (status === "ready") {
+    const lessonTitle = lesson.title ?? "Your lesson";
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+    const lessonLink = `${siteUrl}/lessons/${lesson_id}`;
+
+    void pushNotification({
+      userId: lesson.uploaded_by,
+      kind: "analysis_complete",
+      tone: "success",
+      title: "Analysis complete",
+      subtitle: lessonTitle,
+      bodyMd: "Your lesson analysis is ready to view.",
+      link: `/lessons/${lesson_id}`,
+    });
+
+    const { data: teacher } = await supabase
+      .from("profiles")
+      .select("email, display_name")
+      .eq("id", lesson.uploaded_by)
+      .maybeSingle();
+
+    if (teacher?.email) {
+      void email
+        .sendAnalysisComplete({
+          to: teacher.email,
+          teacherName: teacher.display_name ?? teacher.email,
+          lessonTitle,
+          lessonLink,
+        })
+        .then((result) => {
+          if (!result.ok) {
+            console.error("analysis-complete webhook: email failed", {
+              lessonId: lesson_id,
+              teacherEmail: teacher.email,
+              error: result.error,
+            });
+          }
+        });
+    }
+  }
+
+  return Response.json({ ok: true, data: { lesson_id, status } });
+}

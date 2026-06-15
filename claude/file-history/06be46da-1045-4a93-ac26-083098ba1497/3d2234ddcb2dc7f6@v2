@@ -1,0 +1,165 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/checkpoint_action_sheet_widget.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/route_checkpoints_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/sheet_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/uk_formatter.dart';
+
+class RouteCheckpointsSection extends ConsumerWidget {
+  const RouteCheckpointsSection({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(routeCheckpointsProvider);
+    final allCheckpoints =
+        ref.watch(checkpointNotifierProvider).value?.checkpoints ?? [];
+
+    return async.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: ThemeSpacing.sp4),
+        child: Center(child: CircularProgressIndicator.adaptive()),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (results) {
+        if (results.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.only(top: ThemeSpacing.sp2),
+            child: Text(
+              'No checkpoints on this route',
+              style: ThemeText.subheadline.copyWith(
+                color: ThemeColors.textTertiary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          );
+        }
+
+        final byId = {for (final c in allCheckpoints) c.id: c};
+        final pairs = results
+            .map((r) => (result: r, checkpoint: byId[r.checkpointId]))
+            .where((p) => p.checkpoint != null)
+            .toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Checkpoints on route (${pairs.length})',
+              style: ThemeText.labelSmall.copyWith(
+                color: ThemeColors.textTertiary,
+              ),
+            ),
+            const SizedBox(height: ThemeSpacing.sp2),
+            ...pairs.map(
+              (p) => _RouteCheckpointItem(
+                result: p.result,
+                checkpoint: p.checkpoint!,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RouteCheckpointItem extends ConsumerWidget {
+  final RouteCheckpointResult result;
+  final Checkpoint checkpoint;
+
+  const _RouteCheckpointItem({
+    required this.result,
+    required this.checkpoint,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = checkpoint.contributions.isNotEmpty
+        ? checkpoint.contributions.first.status
+        : null;
+    final (Color sc, IconData si) = _statusStyle(status);
+
+    return InkWell(
+      borderRadius: ThemeRadius.brSmall,
+      onTap: () => _onTap(context, ref),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: ThemeSpacing.sp2),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: sc.withValues(alpha: 0.09),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(si, color: sc, size: 16),
+            ),
+            const SizedBox(width: ThemeSpacing.sp3),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    checkpoint.name,
+                    style: ThemeText.bodyMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    UkFormatter.formatDistance(
+                        result.distanceAlongRouteMeters),
+                    style: ThemeText.subheadline.copyWith(
+                      color: ThemeColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right,
+              size: 16,
+              color: ThemeColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _onTap(BuildContext context, WidgetRef ref) {
+    ref.read(sheetStateNotifierProvider.notifier).peek();
+    ref.read(mapControllerProvider.notifier).focusOnCheckpoint(checkpoint);
+    unawaited(
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => CheckpointActionSheet(checkpoint: checkpoint),
+      ),
+    );
+  }
+}
+
+(Color, IconData) _statusStyle(ContributionStatusEnum? status) =>
+    switch (status) {
+      ContributionStatusEnum.ACTIVE => (
+        ThemeColors.danger,
+        Icons.sensors_rounded,
+      ),
+      ContributionStatusEnum.INACTIVE => (
+        const Color(0xFF1F7A4D),
+        Icons.check_circle_outline_rounded,
+      ),
+      ContributionStatusEnum.POLICE_ALERT => (
+        const Color(0xFFB45309),
+        Icons.warning_amber_rounded,
+      ),
+      _ => (ThemeColors.stone300, Icons.help_outline_rounded),
+    };

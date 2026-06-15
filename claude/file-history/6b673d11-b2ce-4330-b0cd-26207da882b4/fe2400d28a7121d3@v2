@@ -1,0 +1,18 @@
+import { getSchoolSummary } from "../_queries/get-school-summary";
+import { SchoolAiSummaryClient } from "./school-ai-summary-client";
+
+type Props = {
+  schoolId: string;
+  totalAnalysed: number;
+};
+
+export async function SchoolAiSummary({ schoolId, totalAnalysed }: Props) {
+  const summary = await getSchoolSummary(schoolId);
+  return (
+    <SchoolAiSummaryClient
+      schoolId={schoolId}
+      summary={summary}
+      totalAnalysed={totalAnalysed}
+    />
+  );
+}

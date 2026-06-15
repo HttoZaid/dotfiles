@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Goal reminder</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f5f5f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
+<tr>
+  <td align="center" style="padding:48px 20px 64px">
+
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="max-width:520px">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#ffffff;padding:28px 40px 24px;border-radius:16px 16px 0 0;border:1px solid #e7e5e4;border-bottom:none">
+          <table cellpadding="0" cellspacing="0" border="0" role="presentation">
+            <tr>
+              <td style="font-size:15px;font-weight:700;color:#1c1917;letter-spacing:-0.02em">Learnalyze</td>
+              <td style="padding-left:7px;vertical-align:middle;padding-top:1px">
+                <div style="width:6px;height:6px;background:#44c5a0;border-radius:50%;display:inline-block"></div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Accent bar -->
+      <tr>
+        <td style="background:#44c5a0;height:3px;border-left:1px solid #38b48f;border-right:1px solid #38b48f"></td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="background:#ffffff;padding:36px 40px 32px;border:1px solid #e7e5e4;border-top:none;border-bottom:none">
+
+          <p style="margin:0 0 8px;font-size:24px;font-weight:700;color:#1c1917;letter-spacing:-0.03em;line-height:1.2">Goal check-in &#x1F3AF;</p>
+
+          <p style="margin:0 0 24px;font-size:15px;color:#44403c;line-height:1.65">
+            Hi <strong style="color:#1c1917">{{teacher_name}}</strong>, a reminder about your active professional development goal.
+          </p>
+
+          <!-- Goal card -->
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="background:#fafaf9;border:1px solid #e7e5e4;border-radius:10px;margin:0 0 20px;overflow:hidden">
+            <!-- Coloured top strip -->
+            <tr>
+              <td style="background:#44c5a0;height:4px"></td>
+            </tr>
+            <tr>
+              <td style="padding:16px 20px 18px">
+                <!-- Focus area badge -->
+                <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="margin-bottom:12px">
+                  <tr>
+                    <td style="background:#f0fdf9;border:1px solid #ccfbee;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:#0c6b46;letter-spacing:0.04em">{{focus_area}}</td>
+                  </tr>
+                </table>
+                <p style="margin:0 0 14px;font-size:14px;color:#1c1917;line-height:1.6;font-weight:500">&ldquo;{{goal_text}}&rdquo;</p>
+                <!-- Days remaining -->
+                <table cellpadding="0" cellspacing="0" border="0" role="presentation">
+                  <tr>
+                    <td style="background:#ffffff;border:1px solid {{urgency_color}};border-radius:6px;padding:4px 10px">
+                      <span style="font-size:12px;font-weight:600;color:{{urgency_color}}">&#x23F0; {{days_label}}</span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0 0 24px;font-size:15px;color:#44403c;line-height:1.65">
+            Head over to review your progress and check whether your latest lessons have moved the needle.
+          </p>
+
+          <!-- CTA -->
+          <table cellpadding="0" cellspacing="0" border="0" role="presentation">
+            <tr>
+              <td style="background:#44c5a0;border-radius:10px">
+                <a href="{{action_plans_link}}" style="display:inline-block;padding:14px 32px;font-size:14px;font-weight:600;color:#0c3028;text-decoration:none;letter-spacing:-0.01em">View my goals &rarr;</a>
+              </td>
+            </tr>
+          </table>
+
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#fafaf9;padding:20px 40px;border-radius:0 0 16px 16px;border:1px solid #e7e5e4;border-top:none">
+          <p style="margin:0;font-size:12px;color:#a8a29e;text-align:center;line-height:1.8">
+            Learnalyze &mdash; AI-powered teaching insights<br>
+            <a href="https://learnalyze.app" style="color:#78716c;text-decoration:underline">learnalyze.app</a>
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td>
+</tr>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,66 @@
+import { Suspense } from "react";
+import { notFound, redirect } from "next/navigation";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getUserProfile, getSchool } from "../_queries/school";
+import { getSchoolAnalytics } from "./_queries/get-school-analytics";
+import { SchoolAnalyticsShell } from "./_components/school-analytics-shell";
+import { SchoolAiSummary } from "./_components/school-ai-summary";
+
+export const dynamic = "force-dynamic";
+
+function AiSummarySkeleton() {
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <div className="flex items-center gap-2.5 mb-4">
+        <Skeleton className="size-7 rounded-lg" />
+        <div className="space-y-1">
+          <Skeleton className="h-4 w-44" />
+          <Skeleton className="h-3 w-64" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+        </div>
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default async function SchoolAnalyticsPage() {
+  const { user, profile } = await getUserProfile();
+
+  if (!user) redirect("/sign-in");
+  if (!profile?.school_id) notFound();
+  if (profile.role !== "principal" && profile.role !== "head_of_department") {
+    redirect("/forbidden");
+  }
+
+  const schoolId = profile.school_id;
+
+  const [school, analytics] = await Promise.all([
+    getSchool(schoolId),
+    getSchoolAnalytics(schoolId),
+  ]);
+
+  if (!analytics) notFound();
+
+  return (
+    <SchoolAnalyticsShell
+      schoolName={school?.name ?? "Your School"}
+      data={analytics}
+      getTeacherHref={(id) => `/school/staff?member=${id}`}
+      aiSummarySlot={
+        <Suspense fallback={<AiSummarySkeleton />}>
+          <SchoolAiSummary
+            schoolId={schoolId}
+            totalAnalysed={analytics.aggregate.kpis.totalLessons}
+          />
+        </Suspense>
+      }
+    />
+  );
+}

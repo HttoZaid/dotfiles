@@ -1,0 +1,122 @@
+import 'package:flutter/material.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+
+class CheckpointShimmer extends StatelessWidget {
+  const CheckpointShimmer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final base =
+        isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey[300]!;
+    final highlight =
+        isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey[100]!;
+
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sp4),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (_, index) => Shimmer.fromColors(
+            baseColor: base,
+            highlightColor: highlight,
+            period: const Duration(milliseconds: 1600),
+            child: const _ShimmerCard(),
+          ),
+          childCount: 7,
+        ),
+      ),
+    );
+  }
+}
+
+class _ShimmerCard extends StatelessWidget {
+  const _ShimmerCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: ThemeSpacing.sp2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: ThemeSpacing.sp4,
+        vertical: ThemeSpacing.sp3,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: ThemeRadius.brLg,
+        border: Border.all(color: ThemeColors.border),
+      ),
+      child: Row(
+        children: [
+          // Status circle
+          Container(
+            width: 38,
+            height: 38,
+            decoration: const BoxDecoration(
+              color: Colors.black,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: ThemeSpacing.sp3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Name line
+                Container(
+                  width: 160,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: ThemeRadius.brSm,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Meta row
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: ThemeRadius.brXs,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 36,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: ThemeRadius.brXs,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 48,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: ThemeRadius.brXs,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: ThemeSpacing.sp2),
+          Container(
+            width: 14,
+            height: 14,
+            decoration: const BoxDecoration(
+              color: Colors.black,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

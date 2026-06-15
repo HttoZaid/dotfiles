@@ -1,0 +1,46 @@
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+
+class MapFocusButton extends ConsumerWidget {
+  const MapFocusButton({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final heading =
+        ref.watch(userLocationStreamProvider).value?.heading ?? 0.0;
+
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: ThemeColors.bgRaised,
+        boxShadow: ThemeShadows.sm,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () =>
+              ref.read(mapControllerProvider.notifier).focusOnUserLocation(),
+          child: Center(
+            child: Transform.rotate(
+              angle: heading * (pi / 180),
+              child: const Icon(
+                Icons.navigation,
+                color: ThemeColors.accent,
+                size: 22,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

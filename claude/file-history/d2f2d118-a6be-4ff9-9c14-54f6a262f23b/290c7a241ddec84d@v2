@@ -1,0 +1,82 @@
+import { useSheet } from "@/components/ui/sheet";
+import { useRouteState } from "@/features/navigation/route-context";
+import { formatDistance, formatDuration, formatEta } from "@/features/navigation/lib/format-route";
+import { Search, X } from "lucide-react-native";
+import { Pressable, Text, View } from "react-native";
+import Animated, {
+	useAnimatedStyle,
+	useSharedValue,
+	withSpring,
+	withTiming,
+	interpolate,
+	Extrapolation,
+} from "react-native-reanimated";
+import { useEffect } from "react";
+
+function NavPeek() {
+	const { etaSeconds, remainingMeters, totalMeters, stopNavigation } = useRouteState();
+
+	const progress =
+		totalMeters && remainingMeters != null
+			? Math.max(0, Math.min(1, 1 - remainingMeters / totalMeters))
+			: 0;
+
+	const progressAnim = useSharedValue(progress);
+
+	useEffect(() => {
+		progressAnim.value = withTiming(progress, { duration: 900 });
+	}, [progress, progressAnim]);
+
+	const barStyle = useAnimatedStyle(() => ({
+		width: `${interpolate(progressAnim.value, [0, 1], [0, 100], Extrapolation.CLAMP)}%`,
+	}));
+
+	return (
+		<View className="gap-3">
+			{/* Progress bar */}
+			<View className="h-1 w-full overflow-hidden rounded-full bg-muted">
+				<Animated.View style={barStyle} className="h-full rounded-full bg-primary" />
+			</View>
+
+			<View className="flex-row items-center justify-between">
+				<View className="gap-0.5">
+					<Text className="text-[22px] font-bold leading-tight text-foreground">
+						{etaSeconds != null ? formatDuration(etaSeconds) : "—"}
+					</Text>
+					<Text className="text-[13px] text-muted-foreground">
+						{remainingMeters != null ? formatDistance(remainingMeters) : ""}
+						{etaSeconds != null ? `  ·  Arrive ${formatEta(etaSeconds)}` : ""}
+					</Text>
+				</View>
+
+				<Pressable
+					onPress={stopNavigation}
+					hitSlop={12}
+					className="active:opacity-60"
+				>
+					<View className="h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
+						<X size={18} className="text-destructive" strokeWidth={2.5} />
+					</View>
+				</Pressable>
+			</View>
+		</View>
+	);
+}
+
+export function SheetSearchDecoy() {
+	const { expand } = useSheet();
+	const { phase } = useRouteState();
+
+	if (phase === "navigating") {
+		return <NavPeek />;
+	}
+
+	return (
+		<Pressable onPress={expand}>
+			<View className="flex-row items-center gap-3 rounded-2xl bg-muted px-4 py-4">
+				<Search size={22} className="text-foreground" strokeWidth={2.5} />
+				<Text className="flex-1 text-lg font-semibold text-foreground">Where to?</Text>
+			</View>
+		</Pressable>
+	);
+}

@@ -1,0 +1,59 @@
+import { Suspense } from "react";
+import { notFound } from "next/navigation";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getOrgSchoolMeta } from "../../_queries/get-org-school-meta";
+import { getSchoolAnalytics } from "@/app/(dashboard)/school/analytics/_queries/get-school-analytics";
+import { SchoolAnalyticsShell } from "@/app/(dashboard)/school/analytics/_components/school-analytics-shell";
+import { SchoolAiSummary } from "@/app/(dashboard)/school/analytics/_components/school-ai-summary";
+
+type Props = { params: Promise<{ schoolId: string }> };
+
+export const dynamic = "force-dynamic";
+
+function AiSummarySkeleton() {
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <div className="flex items-center gap-2.5 mb-4">
+        <Skeleton className="size-7 rounded-lg" />
+        <div className="space-y-1">
+          <Skeleton className="h-4 w-44" />
+          <Skeleton className="h-3 w-64" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+        </div>
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default async function OrgSchoolAnalyticsPage({ params }: Props) {
+  const { schoolId } = await params;
+  const [meta, analytics] = await Promise.all([
+    getOrgSchoolMeta(schoolId),
+    getSchoolAnalytics(schoolId),
+  ]);
+
+  if (!meta.ok || !analytics) notFound();
+
+  return (
+    <SchoolAnalyticsShell
+      schoolName={meta.school.name}
+      data={analytics}
+      getTeacherHref={(id) => `/organization/${schoolId}/staff?member=${id}`}
+      aiSummarySlot={
+        <Suspense fallback={<AiSummarySkeleton />}>
+          <SchoolAiSummary
+            schoolId={schoolId}
+            totalAnalysed={analytics.aggregate.kpis.totalLessons}
+          />
+        </Suspense>
+      }
+    />
+  );
+}

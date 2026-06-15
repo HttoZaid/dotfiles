@@ -1,0 +1,32 @@
+#include "./client.hpp"
+#include "../payloads/handshake_payloads.hpp"
+#include "../protocol/handshake.hpp"
+#include <boost/asio/io_context.hpp>
+
+namespace WAWP {
+
+Client::Client(boost::asio::io_context& ioc, const ClientConfig& config)
+    : config_(config)
+    , ioc_(ioc)
+    , socket_(ioc, "web.whatsapp.com", "/ws/chat", "443") {
+}
+
+void Client::connect() {
+	socket_.connect();
+
+	auto noise_key = Crypto::generate_key_pair();
+	auto identity_key = Crypto::generate_identity_key_pair();
+	auto signed_pre_key = Crypto::generate_signed_pre_key(identity_key, 1);
+
+	auto reg_id = Payload::Handshake::make_registration_id();
+
+	config_.store->set_noise_key_pair(noise_key);
+	config_.store->set_registration_id(reg_id);
+	config_.store->set_identity_key_pair(identity_key);
+	config_.store->set_signed_pre_key(signed_pre_key);
+
+	Protocol::Handshake handshake { socket_, config_.store };
+	handshake.start();
+}
+
+}

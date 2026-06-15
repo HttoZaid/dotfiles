@@ -1,0 +1,446 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/mapview.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/providers/navigation_provider.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+
+class CheckpointActionSheet extends ConsumerWidget {
+  final Checkpoint checkpoint;
+
+  const CheckpointActionSheet({required this.checkpoint, super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.status
+            : null;
+    final lastUpdate =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.createdAt
+            : checkpoint.createdAt;
+    final lastUpdateStr = DateFormat('HH:mm').format(lastUpdate.toLocal());
+    // metadata is untyped in the generated DTO — dynamic call is intentional
+    // ignore: avoid_dynamic_calls
+    final cameraUrl = (checkpoint as dynamic).metadata?.cameraUrl as String?;
+
+    final (Color statusColor, IconData statusIcon, String statusLabel) =
+        switch (status) {
+          ContributionStatusEnum.ACTIVE => (
+            ThemeColors.danger,
+            Icons.sensors_rounded,
+            'Active',
+          ),
+          ContributionStatusEnum.INACTIVE => (
+            const Color(0xFF1F7A4D),
+            Icons.check_circle_outline_rounded,
+            'Clear',
+          ),
+          ContributionStatusEnum.POLICE_ALERT => (
+            const Color(0xFFB45309),
+            Icons.warning_amber_rounded,
+            'Police Activity',
+          ),
+          _ => (
+            ThemeColors.stone400,
+            Icons.help_outline_rounded,
+            'Unknown',
+          ),
+        };
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: ThemeColors.bgRaised,
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(ThemeRadius.r2xl),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Padding(
+            padding: const EdgeInsets.only(top: ThemeSpacing.sp3),
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ThemeColors.borderStrong,
+                borderRadius: ThemeRadius.brFull,
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              ThemeSpacing.sp4,
+              ThemeSpacing.sp4,
+              ThemeSpacing.sp4,
+              ThemeSpacing.sp4,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.10),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(statusIcon, color: statusColor, size: 22),
+                    ),
+                    const SizedBox(width: ThemeSpacing.sp3),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            checkpoint.name,
+                            style: const TextStyle(
+                              fontFamily: ThemeFonts.ui,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.4,
+                              color: ThemeColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  statusLabel,
+                                  style: TextStyle(
+                                    fontFamily: ThemeFonts.ui,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: statusColor,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Updated $lastUpdateStr',
+                                style: const TextStyle(
+                                  fontFamily: ThemeFonts.ui,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: ThemeColors.textTertiary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: ThemeSpacing.sp4),
+
+                // View on map
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      ref.read(bottomNavIndexProvider.notifier).state = 0;
+                      final ctrl = ref.read(mapControllerProvider);
+                      if (ctrl != null) {
+                        ctrl.camera.lookAtPointWithMeasure(
+                          GeoCoordinates(
+                            checkpoint.latitude.toDouble(),
+                            checkpoint.longitude.toDouble(),
+                          ),
+                          MapMeasure(MapMeasureKind.distanceInMeters, 1000),
+                        );
+                      }
+                      Navigator.pop(context);
+                    },
+                    icon: const Icon(Icons.map_outlined, size: 18),
+                    label: const Text('View on map'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: ThemeColors.textPrimary,
+                      side: const BorderSide(
+                        color: ThemeColors.border,
+                        width: 1.5,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: ThemeSpacing.sp3,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: ThemeRadius.brLg,
+                      ),
+                      textStyle: const TextStyle(
+                        fontFamily: ThemeFonts.ui,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Camera feed
+                if (cameraUrl != null &&
+                    cameraUrl.isNotEmpty &&
+                    !cameraUrl.contains('https://example')) ...[
+                  const SizedBox(height: ThemeSpacing.sp4),
+                  ClipRRect(
+                    borderRadius: ThemeRadius.brLg,
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Stack(
+                        children: [
+                          Image.network(
+                            cameraUrl,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder:
+                                (_, _, _) => const ColoredBox(
+                                  color: ThemeColors.bgSubtle,
+                                  child: Center(
+                                    child: Icon(
+                                      Icons.videocam_off_outlined,
+                                      color: ThemeColors.stone300,
+                                      size: 32,
+                                    ),
+                                  ),
+                                ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            left: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.circle,
+                                    color: Colors.red,
+                                    size: 7,
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'LIVE',
+                                    style: TextStyle(
+                                      fontFamily: ThemeFonts.ui,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 10,
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: ThemeSpacing.sp5),
+
+                const Text(
+                  'Update status',
+                  style: TextStyle(
+                    fontFamily: ThemeFonts.ui,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                    color: ThemeColors.textTertiary,
+                  ),
+                ),
+                const SizedBox(height: ThemeSpacing.sp3),
+
+                _StatusButton(
+                  label: 'Active',
+                  description: 'Checkpoint is here right now',
+                  color: ThemeColors.danger,
+                  icon: Icons.sensors_rounded,
+                  isCurrentStatus: status == ContributionStatusEnum.ACTIVE,
+                  onTap: () =>
+                      _submit(ref, context, ContributionStatusEnum.ACTIVE),
+                ),
+                const SizedBox(height: ThemeSpacing.sp2),
+                _StatusButton(
+                  label: 'Police Activity',
+                  description: 'High presence in the area',
+                  color: const Color(0xFFB45309),
+                  icon: Icons.warning_amber_rounded,
+                  isCurrentStatus:
+                      status == ContributionStatusEnum.POLICE_ALERT,
+                  onTap: () => _submit(
+                    ref,
+                    context,
+                    ContributionStatusEnum.POLICE_ALERT,
+                  ),
+                ),
+                const SizedBox(height: ThemeSpacing.sp2),
+                _StatusButton(
+                  label: 'Clear',
+                  description: 'Nothing found at this location',
+                  color: const Color(0xFF1F7A4D),
+                  icon: Icons.check_circle_outline_rounded,
+                  isCurrentStatus: status == ContributionStatusEnum.INACTIVE,
+                  onTap: () =>
+                      _submit(ref, context, ContributionStatusEnum.INACTIVE),
+                ),
+
+                SizedBox(
+                  height: ThemeSpacing.sp4 +
+                      MediaQuery.of(context).padding.bottom,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _submit(
+    WidgetRef ref,
+    BuildContext context,
+    ContributionStatusEnum status,
+  ) {
+    unawaited(
+      ref
+          .read(checkpointNotifierProvider.notifier)
+          .contribute(checkpoint.id, status),
+    );
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Status updated to ${status.name.toLowerCase()}'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: ThemeColors.stone900,
+        shape: RoundedRectangleBorder(borderRadius: ThemeRadius.brMd),
+        margin: const EdgeInsets.all(ThemeSpacing.sp4),
+      ),
+    );
+  }
+}
+
+class _StatusButton extends StatelessWidget {
+  final String label;
+  final String description;
+  final Color color;
+  final IconData icon;
+  final bool isCurrentStatus;
+  final VoidCallback onTap;
+
+  const _StatusButton({
+    required this.label,
+    required this.description,
+    required this.color,
+    required this.icon,
+    required this.isCurrentStatus,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color:
+          isCurrentStatus
+              ? color.withValues(alpha: 0.06)
+              : Colors.transparent,
+      borderRadius: ThemeRadius.brLg,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: ThemeRadius.brLg,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: ThemeSpacing.sp4,
+            vertical: ThemeSpacing.sp3,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: ThemeRadius.brLg,
+            border: Border.all(
+              color: isCurrentStatus
+                  ? color.withValues(alpha: 0.3)
+                  : ThemeColors.border,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.10),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: ThemeSpacing.sp3),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontFamily: ThemeFonts.ui,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            isCurrentStatus ? color : ThemeColors.textPrimary,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    Text(
+                      description,
+                      style: const TextStyle(
+                        fontFamily: ThemeFonts.ui,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                        color: ThemeColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isCurrentStatus)
+                Icon(Icons.check_rounded, size: 16, color: color)
+              else
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 16,
+                  color: ThemeColors.stone300,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

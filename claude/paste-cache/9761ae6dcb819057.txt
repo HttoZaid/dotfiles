@@ -1,0 +1,148 @@
+I already have the full `verifyServerCert` from the earlier fetch. Here's exactly what whatsmeow does mapped to what you need in C++ with OpenSSL:
+
+The cert chain structure is:
+
+```
+decrypted_payload → proto: CertChain {
+  intermediate: NoiseCertificate {
+    details: <raw bytes of NoiseCertificate_Details>
+    signature: <64-byte Ed25519 sig>
+  }
+  leaf: NoiseCertificate {
+    details: <raw bytes of NoiseCertificate_Details>
+    signature: <64-byte Ed25519 sig>
+  }
+}
+
+NoiseCertificate_Details {
+  serial: uint64
+  issuer_serial: uint64  // must be 0 for intermediate, intermediate.serial for leaf
+  key: bytes             // 32 bytes — the key certified by this cert
+}
+```
+
+The verification chain:
+
+```
+WACertPubKey  →  verifies sig on  →  intermediate.details_raw
+intermediate.details.key  →  verifies sig on  →  leaf.details_raw
+leaf.details.key  ==  server_static_key  (the decrypted 32 bytes from step 2)
+```
+
+All signatures are **Ed25519** (not ECDSA, not X25519). The `ecc.VerifySignature` in whatsmeow is libsignal's Ed25519 verify over raw bytes — not SHA256-then-verify, just the raw message passed directly into Ed25519 verify. The "message" is the raw serialized `details` bytes (not re-parsed, the raw wire bytes).
+
+In C++ with OpenSSL 3.x:
+
+```cpp
+bool ed25519_verify(
+    const std::array<uint8_t, 32>& pub_key,
+    const std::vector<uint8_t>& message,
+    const std::vector<uint8_t>& signature   // must be 64 bytes
+) {
+    EVP_PKEY* pkey = EVP_PKEY_new_raw_public_key(
+        EVP_PKEY_ED25519, nullptr,
+        pub_key.data(), pub_key.size()
+    );
+    if (!pkey) return false;
+
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    bool ok = false;
+    if (ctx) {
+        if (EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, pkey) == 1 &&
+            EVP_DigestVerify(ctx, signature.data(), signature.size(),
+                             message.data(), message.size()) == 1) {
+            ok = true;
+        }
+        EVP_MD_CTX_free(ctx);
+    }
+    EVP_PKEY_free(pkey);
+    return ok;
+}
+```
+
+And the verify function itself:
+
+```cpp
+void verify_server_cert(
+    const std::vector<uint8_t>& cert_plaintext,   // decrypted_payload
+    const std::vector<uint8_t>& server_static_key // decrypted 32 bytes from step 2
+) {
+    // Parse outer CertChain
+    WAWebProto::CertChain cert_chain;
+    if (!cert_chain.ParseFromArray(cert_plaintext.data(), cert_plaintext.size()))
+        throw std::runtime_error("Failed to parse CertChain");
+
+    const auto& intermediate = cert_chain.intermediate();
+    const auto& leaf         = cert_chain.leaf();
+
+    std::vector<uint8_t> inter_details_raw {
+        intermediate.details().begin(), intermediate.details().end()
+    };
+    std::vector<uint8_t> inter_sig {
+        intermediate.signature().begin(), intermediate.signature().end()
+    };
+    std::vector<uint8_t> leaf_details_raw {
+        leaf.details().begin(), leaf.details().end()
+    };
+    std::vector<uint8_t> leaf_sig {
+        leaf.signature().begin(), leaf.signature().end()
+    };
+
+    if (inter_sig.size() != 64 || leaf_sig.size() != 64)
+        throw std::runtime_error("Bad cert signature length");
+
+    // 1. Verify intermediate cert with hardcoded WA root key
+    static const std::array<uint8_t, 32> WA_CERT_PUB_KEY = {
+        0x14, 0x23, 0x75, 0x57, 0x4d, 0x0a, 0x58, 0x71,
+        0x66, 0xaa, 0xe7, 0x1e, 0xbe, 0x51, 0x64, 0x37,
+        0xc4, 0xa2, 0x8b, 0x73, 0xe3, 0x69, 0x5c, 0x6c,
+        0xe1, 0xf7, 0xf9, 0x54, 0x5d, 0xa8, 0xee, 0x6b
+    };
+    if (!ed25519_verify(WA_CERT_PUB_KEY, inter_details_raw, inter_sig))
+        throw std::runtime_error("Intermediate cert signature invalid");
+
+    // 2. Parse intermediate details to get its key + serial
+    WAWebProto::CertChain::NoiseCertificate::Details inter_details;
+    if (!inter_details.ParseFromArray(inter_details_raw.data(), inter_details_raw.size()))
+        throw std::runtime_error("Failed to parse intermediate cert details");
+
+    if (inter_details.issuerserial() != 0)
+        throw std::runtime_error("Unexpected intermediate issuer serial");
+
+    if (inter_details.key().size() != 32)
+        throw std::runtime_error("Intermediate cert key wrong length");
+
+    std::array<uint8_t, 32> inter_key;
+    std::copy(inter_details.key().begin(), inter_details.key().end(), inter_key.begin());
+
+    // 3. Verify leaf cert with intermediate's key
+    if (!ed25519_verify(inter_key, leaf_details_raw, leaf_sig))
+        throw std::runtime_error("Leaf cert signature invalid");
+
+    // 4. Parse leaf details, check issuer serial matches intermediate serial
+    WAWebProto::CertChain::NoiseCertificate::Details leaf_details;
+    if (!leaf_details.ParseFromArray(leaf_details_raw.data(), leaf_details_raw.size()))
+        throw std::runtime_error("Failed to parse leaf cert details");
+
+    if (leaf_details.issuerserial() != inter_details.serial())
+        throw std::runtime_error("Leaf issuer serial mismatch");
+
+    // 5. Leaf key must equal the decrypted server static key
+    std::vector<uint8_t> leaf_key {
+        leaf_details.key().begin(), leaf_details.key().end()
+    };
+    if (leaf_key != server_static_key)
+        throw std::runtime_error("Leaf cert key doesn't match server static key");
+}
+```
+
+Then in your handshake after decrypting both server payloads:
+
+```cpp
+std::vector<uint8_t> server_static_key = m_noise_state.decrypt(server_static_bytes);
+std::vector<uint8_t> decrypted_payload = m_noise_state.decrypt(encrypted_payload);
+
+verify_server_cert(decrypted_payload, server_static_key);  // throws on failure
+```
+
+Two things to double-check on the proto names: `CertChain`, `NoiseCertificate`, `Details`, `issuerserial`, `serial`, `key` — these depend on how `waCert.proto` was generated for your build. The field names in Go are camelCase accessors over snake_case proto fields, so in C++ protobuf it'd be `issuer_serial()`, `serial_()` etc. Check your generated `WAWeb.pb.h` (or whatever cert proto header you have) for the exact accessor names.

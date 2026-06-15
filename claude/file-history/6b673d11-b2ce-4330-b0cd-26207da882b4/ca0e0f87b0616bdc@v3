@@ -1,0 +1,173 @@
+"use client";
+
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowClockwiseIcon, SparkleIcon, LockIcon } from "@phosphor-icons/react";
+import { cn } from "@/lib/utils";
+import type { AnalyticsSummary } from "@/app/(dashboard)/analytics/_lib/analytics-types";
+import { regenerateSchoolSummaryAction } from "../_actions/regenerate-school-summary";
+
+type Props = {
+  schoolId: string;
+  summary: AnalyticsSummary | null;
+  totalAnalysed: number;
+};
+
+export function SchoolAiSummaryClient({ schoolId, summary, totalAnalysed }: Props) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleGenerate() {
+    startTransition(async () => {
+      await regenerateSchoolSummaryAction(schoolId);
+      router.refresh();
+    });
+  }
+
+  // Not enough lessons — locked state
+  if (totalAnalysed < 3) {
+    const remaining = Math.max(0, 3 - totalAnalysed);
+    return (
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-muted">
+            <LockIcon size={14} className="text-muted-foreground" weight="fill" />
+          </div>
+          <h2 className="text-[15px] font-semibold tracking-tight">Sage School Insights</h2>
+        </div>
+        <div className="flex items-start gap-3 rounded-lg bg-muted/40 border border-border/60 px-4 py-3.5">
+          <SparkleIcon size={15} className="text-muted-foreground shrink-0 mt-0.5" weight="duotone" />
+          <p className="text-[13px] text-muted-foreground leading-relaxed">
+            School-wide AI insights unlock once{" "}
+            <span className="font-semibold text-foreground">{remaining} more {remaining === 1 ? "lesson has" : "lessons have"}</span>{" "}
+            been analysed.{" "}
+            <span className="text-muted-foreground/70">
+              ({totalAnalysed} of 3 required)
+            </span>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Enough lessons but no cached summary yet — ready to generate
+  if (!summary) {
+    return (
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+              <SparkleIcon size={14} className="text-primary" weight="fill" />
+            </div>
+            <div>
+              <h2 className="text-[15px] font-semibold tracking-tight">Sage School Insights</h2>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                AI-powered executive summary of systemic teaching trends
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col items-center gap-4 py-6 text-center">
+          <div className="flex size-12 items-center justify-center rounded-full bg-primary/8 ring-1 ring-primary/15">
+            <SparkleIcon size={22} className="text-primary" weight="duotone" />
+          </div>
+          <div>
+            <p className="text-[14px] font-medium text-foreground">Ready to generate insights</p>
+            <p className="text-[13px] text-muted-foreground mt-1 max-w-sm leading-relaxed">
+              {totalAnalysed} lessons have been analysed. Generate your school&apos;s first AI summary of teaching trends, strengths, and growth areas.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={pending}
+            className={cn(
+              "flex items-center gap-2 rounded-lg bg-primary px-4 h-9 text-[13px] font-medium text-primary-foreground",
+              "hover:bg-primary/90 transition-colors",
+              "disabled:opacity-60 disabled:cursor-not-allowed",
+            )}
+          >
+            <SparkleIcon
+              size={14}
+              className={cn(pending && "animate-pulse")}
+              weight="fill"
+            />
+            {pending ? "Generating…" : "Generate Insights"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Summary exists — show insights
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+            <SparkleIcon size={14} className="text-primary" weight="fill" />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-semibold tracking-tight">Sage School Insights</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              AI-powered executive summary of systemic teaching trends
+              {summary.stale && (
+                <span className="ml-2 text-amber-600 dark:text-amber-400">· Stale — click Re-Generate to refresh</span>
+              )}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={pending}
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg border px-3 h-8 text-[12px] font-medium text-muted-foreground",
+            "hover:text-foreground hover:border-border/80 transition-colors shrink-0",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          <ArrowClockwiseIcon
+            size={13}
+            className={cn(pending && "animate-spin")}
+          />
+          {pending ? "Regenerating…" : "Re-Generate"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Systemic Strengths
+            </h3>
+          </div>
+          <ul className="divide-y divide-border">
+            {summary.strengths.map((s, i) => (
+              <li key={i} className="py-3 first:pt-0 last:pb-0">
+                <p className="text-[13px] leading-relaxed text-foreground/85">{s}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Growth Opportunities
+            </h3>
+          </div>
+          <ul className="divide-y divide-border">
+            {summary.growthOpportunities.map((g, i) => (
+              <li key={i} className="py-3 first:pt-0 last:pb-0">
+                <p className="text-[13px] leading-relaxed text-foreground/85">{g}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}

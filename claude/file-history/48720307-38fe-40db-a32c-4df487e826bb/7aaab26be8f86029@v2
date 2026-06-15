@@ -1,0 +1,236 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/checkpoint_action_sheet_widget.dart';
+
+class CheckpointCard extends StatelessWidget {
+  final Checkpoint checkpoint;
+  final double? distanceMeters;
+
+  const CheckpointCard({
+    required this.checkpoint,
+    this.distanceMeters,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.status
+            : null;
+    final lastUpdate =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.createdAt
+            : checkpoint.createdAt;
+
+    return RepaintBoundary(
+      child: Material(
+        color: ThemeColors.bgRaised,
+        borderRadius: ThemeRadius.brLg,
+        child: InkWell(
+          borderRadius: ThemeRadius.brLg,
+          onTap: () {
+            unawaited(
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder:
+                    (context) => CheckpointActionSheet(checkpoint: checkpoint),
+              ),
+            );
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: ThemeRadius.brLg,
+              border: Border.all(color: ThemeColors.border),
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: ThemeSpacing.sp4,
+              vertical: ThemeSpacing.sp3,
+            ),
+            child: Row(
+              children: [
+                _StatusIcon(status: status),
+                const SizedBox(width: ThemeSpacing.sp3),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        checkpoint.name,
+                        style: const TextStyle(
+                          fontFamily: ThemeFonts.ui,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.3,
+                          color: ThemeColors.textPrimary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      _MetaRow(
+                        status: status,
+                        distanceMeters: distanceMeters,
+                        lastUpdate: lastUpdate,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: ThemeSpacing.sp2),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: ThemeColors.stone300,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusIcon extends StatelessWidget {
+  final ContributionStatusEnum? status;
+  const _StatusIcon({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, IconData icon) = switch (status) {
+      ContributionStatusEnum.ACTIVE => (
+        ThemeColors.danger,
+        Icons.sensors_rounded,
+      ),
+      ContributionStatusEnum.INACTIVE => (
+        const Color(0xFF1F7A4D),
+        Icons.check_circle_outline_rounded,
+      ),
+      ContributionStatusEnum.POLICE_ALERT => (
+        const Color(0xFFB45309),
+        Icons.warning_amber_rounded,
+      ),
+      _ => (ThemeColors.stone300, Icons.help_outline_rounded),
+    };
+
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        shape: BoxShape.circle,
+      ),
+      child: Center(child: Icon(icon, color: color, size: 18)),
+    );
+  }
+}
+
+class _MetaRow extends StatelessWidget {
+  final ContributionStatusEnum? status;
+  final double? distanceMeters;
+  final DateTime lastUpdate;
+
+  const _MetaRow({
+    required this.status,
+    required this.distanceMeters,
+    required this.lastUpdate,
+  });
+
+  String get _statusLabel => switch (status) {
+    ContributionStatusEnum.ACTIVE => 'Active',
+    ContributionStatusEnum.INACTIVE => 'Clear',
+    ContributionStatusEnum.POLICE_ALERT => 'Police',
+    _ => 'Unknown',
+  };
+
+  Color get _statusColor => switch (status) {
+    ContributionStatusEnum.ACTIVE => ThemeColors.danger,
+    ContributionStatusEnum.INACTIVE => const Color(0xFF1F7A4D),
+    ContributionStatusEnum.POLICE_ALERT => const Color(0xFFB45309),
+    _ => ThemeColors.stone400,
+  };
+
+  String _formatDistance(double m) {
+    final miles = m / 1609.344;
+    if (miles < 0.1) return '${m.round()} m';
+    if (miles < 10) return '${miles.toStringAsFixed(1)} mi';
+    return '${miles.round()} mi';
+  }
+
+  String _formatTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return DateFormat('HH:mm').format(dt.toLocal());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: _statusColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            _statusLabel,
+            style: TextStyle(
+              fontFamily: ThemeFonts.ui,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: _statusColor,
+              letterSpacing: 0.1,
+            ),
+          ),
+        ),
+        if (distanceMeters != null) ...[
+          const _Sep(),
+          Text(
+            _formatDistance(distanceMeters!),
+            style: const TextStyle(
+              fontFamily: ThemeFonts.ui,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: ThemeColors.textTertiary,
+            ),
+          ),
+        ],
+        const _Sep(),
+        Text(
+          _formatTimeAgo(lastUpdate),
+          style: const TextStyle(
+            fontFamily: ThemeFonts.ui,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: ThemeColors.textTertiary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Sep extends StatelessWidget {
+  const _Sep();
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(horizontal: 5),
+    child: Text(
+      '·',
+      style: TextStyle(
+        fontFamily: ThemeFonts.ui,
+        fontSize: 11,
+        color: ThemeColors.stone300,
+      ),
+    ),
+  );
+}

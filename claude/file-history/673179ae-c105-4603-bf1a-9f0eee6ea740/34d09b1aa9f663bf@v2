@@ -1,0 +1,77 @@
+package com.example.ukcheckpoints_app
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import androidx.core.content.ContextCompat
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
+
+class MainActivity : FlutterActivity() {
+
+    private var lm: LocationManager? = null
+    private var gpsListener: LocationListener? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.example.ukcheckpoints_app/gps"
+        ).setStreamHandler(object : EventChannel.StreamHandler {
+
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                if (ContextCompat.checkSelfPermission(
+                        this@MainActivity,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    events.error("PERMISSION_DENIED", "ACCESS_FINE_LOCATION not granted", null)
+                    return
+                }
+
+                val locationManager =
+                    getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                lm = locationManager
+
+                val listener = LocationListener { loc -> events.success(loc.toMap()) }
+                gpsListener = listener
+
+                // GPS_PROVIDER bypasses every fused/batched layer — the only path
+                // that actually honours a 1 s minTime on Android 12+.
+                locationManager.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    1000L,
+                    0f,
+                    listener
+                )
+            }
+
+            override fun onCancel(arguments: Any?) {
+                gpsListener?.let { lm?.removeUpdates(it) }
+                gpsListener = null
+                lm = null
+            }
+        })
+    }
+
+    @Suppress("DEPRECATION")
+    private fun Location.toMap(): Map<String, Any> = mapOf(
+        "latitude"  to latitude,
+        "longitude" to longitude,
+        "accuracy"  to accuracy.toDouble(),
+        "altitude"  to altitude,
+        "speed"     to if (hasSpeed()) speed.toDouble() else -1.0,
+        "heading"   to if (hasBearing()) bearing.toDouble() else -1.0,
+        "time"      to time.toDouble(),
+        "isMocked"  to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                            isMock
+                        else
+                            isFromMockProvider,
+    )
+}

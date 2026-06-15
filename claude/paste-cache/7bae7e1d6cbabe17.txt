@@ -1,0 +1,27 @@
+The proto file for `waCert`:Got it from Baileys' proto which mirrors whatsmeow's `waCert`. Here it is:
+
+```proto
+message CertChain {
+    optional NoiseCertificate leaf         = 1;
+    optional NoiseCertificate intermediate = 2;
+
+    message NoiseCertificate {
+        optional bytes details   = 1;  // raw bytes of serialized Details
+        optional bytes signature = 2;  // 64-byte Ed25519 signature over details bytes
+
+        message Details {
+            optional uint32 serial       = 1;
+            optional uint32 issuerSerial = 2;
+            optional bytes  key          = 3;  // 32-byte public key
+            optional uint64 notBefore    = 4;
+            optional uint64 notAfter     = 5;
+        }
+    }
+}
+```
+
+Key things to note from this structure:
+
+`details` is **raw bytes**, not an inline message. That's why whatsmeow does `intermediateCertDetailsRaw := certChain.GetIntermediate().GetDetails()` and then passes those raw bytes directly into `VerifySignature` — the Ed25519 signature is over the wire-encoded `Details` bytes, not over a parsed struct. Then separately `proto.Unmarshal(intermediateCertDetailsRaw, &intermediateCertDetails)` to read the fields. If you try to sign/verify over a re-serialized version you'll get a mismatch.
+
+So in your `WAWeb.proto` (or wherever your cert message is defined), add this if it's not already there.

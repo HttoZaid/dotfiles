@@ -1,0 +1,457 @@
+package expo.modules.heremaps
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.util.Log
+import com.here.sdk.core.*
+import com.here.sdk.core.errors.InstantiationErrorException
+import com.here.sdk.location.LocationAccuracy
+import com.here.sdk.location.LocationEngine
+import com.here.sdk.mapview.*
+import com.here.sdk.navigation.*
+import com.here.sdk.routing.*
+import com.here.sdk.search.*
+import com.here.sdk.transport.TransportSpecification
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.Any
+import kotlin.Double
+import kotlin.Exception
+import kotlin.IllegalStateException
+import kotlin.Int
+import kotlin.Long
+import kotlin.Nothing
+import kotlin.String
+import kotlin.Throwable
+import kotlin.apply
+import kotlin.collections.plus
+import kotlin.coroutines.resume
+import kotlin.getValue
+import kotlin.lazy
+import kotlin.let
+import kotlin.to
+
+sealed interface HereResult<out T> {
+    data class Ok<T>(val value: T) : HereResult<T>
+    data class Err(val code: String, val message: String, val cause: Throwable? = null) : HereResult<Nothing>
+}
+
+enum class HereTransportMode {
+    CAR, TRUCK, PEDESTRIAN, BICYCLE, SCOOTER, TAXI, BUS
+}
+
+private fun searchErrorCode(e: SearchError): String = when (e) {
+    SearchError.HTTP_ERROR,
+    SearchError.OFFLINE -> "E_OFFLINE"
+    SearchError.SERVER_UNREACHABLE -> "E_SERVER"
+    SearchError.AUTHENTICATION_FAILED -> "E_AUTH"
+    SearchError.BAD_REQUEST -> "E_BAD_INPUT"
+    SearchError.NO_RESULTS_FOUND -> "E_NO_RESULTS"
+    else -> "E_SEARCH_FAILED"
+}
+
+private fun searchErrorMessage(e: SearchError): String = when (e) {
+    SearchError.HTTP_ERROR,
+    SearchError.OFFLINE -> "You're offline. Search needs a connection."
+    SearchError.SERVER_UNREACHABLE -> "Search is temporarily unavailable."
+    SearchError.AUTHENTICATION_FAILED -> "Search authentication failed."
+    SearchError.BAD_REQUEST -> "Couldn't search for that."
+    SearchError.NO_RESULTS_FOUND -> "No results found."
+    else -> "Search failed. Please try again."
+}
+
+private fun routingErrorCode(e: RoutingError): String = when (e) {
+    RoutingError.NO_ROUTE_FOUND -> "E_NO_ROUTE"
+    RoutingError.OFFLINE,
+    RoutingError.HTTP_ERROR -> "E_OFFLINE"
+    RoutingError.SERVER_UNREACHABLE -> "E_SERVER"
+    RoutingError.AUTHENTICATION_FAILED,
+    RoutingError.FORBIDDEN -> "E_AUTH"
+    RoutingError.INVALID_PARAMETER -> "E_BAD_INPUT"
+    else -> "E_ROUTE_FAILED"
+}
+
+private fun routingErrorMessage(e: RoutingError): String = when (e) {
+    RoutingError.NO_ROUTE_FOUND -> "We couldn't find a route to that place. Try a different destination."
+    RoutingError.OFFLINE,
+    RoutingError.HTTP_ERROR -> "You're offline. Connect to the internet to plan a route."
+    RoutingError.SERVER_UNREACHABLE -> "Our routing service is unavailable right now. Try again shortly."
+    RoutingError.AUTHENTICATION_FAILED,
+    RoutingError.FORBIDDEN -> "Map service authentication failed."
+    RoutingError.INVALID_PARAMETER -> "Something went wrong with the route request."
+    else -> "Couldn't calculate the route. Check your connection and try again."
+}
+
+private fun transportModeFor(mode: HereTransportMode): com.here.sdk.transport.TransportMode = when (mode) {
+    HereTransportMode.CAR -> com.here.sdk.transport.TransportMode.CAR
+    HereTransportMode.TRUCK -> com.here.sdk.transport.TransportMode.TRUCK
+    HereTransportMode.PEDESTRIAN -> com.here.sdk.transport.TransportMode.PEDESTRIAN
+    HereTransportMode.BICYCLE -> com.here.sdk.transport.TransportMode.BICYCLE
+    HereTransportMode.SCOOTER -> com.here.sdk.transport.TransportMode.SCOOTER
+    HereTransportMode.TAXI -> com.here.sdk.transport.TransportMode.TAXI
+    HereTransportMode.BUS -> com.here.sdk.transport.TransportMode.BUS
+}
+
+private data class FeatureData(
+    val title: String,
+    val subtitle: String,
+    val placeId: String,
+    val lat: Double?,
+    val lng: Double?
+)
+
+private fun emptyGeoJson(): Map<String, Any?> = mapOf(
+    "type" to "FeatureCollection",
+    "features" to emptyList<Map<String, Any?>>()
+)
+
+private fun toGeoJson(features: List<FeatureData>): Map<String, Any?> = mapOf(
+    "type" to "FeatureCollection",
+    "features" to features.map { f ->
+        mapOf(
+            "type" to "Feature",
+            "geometry" to if (f.lat != null && f.lng != null) {
+                mapOf("type" to "Point", "coordinates" to listOf(f.lng, f.lat))
+            } else null,
+            "properties" to mapOf(
+                "title" to f.title,
+                "subtitle" to f.subtitle,
+                "placeId" to f.placeId,
+                "resolved" to (f.lat != null && f.lng != null)
+            )
+        )
+    }
+)
+
+internal fun routeSummary(route: Route): Map<String, Any?> = mapOf(
+    "distanceMeters" to route.lengthInMeters,
+    "durationSeconds" to route.duration.seconds.toInt()
+)
+
+class SearchManager {
+    private val searchEngine: SearchEngine by lazy {
+        try {
+            SearchEngine()
+        } catch (e: InstantiationErrorException) {
+            throw IllegalStateException("SearchEngine init failed: ${e.error.name}", e)
+        }
+    }
+
+    private val lastQuery = AtomicReference("")
+
+    suspend fun suggest(query: String, near: GeoCoordinates): HereResult<Map<String, Any?>> =
+        suspendCancellableCoroutine { continuation ->
+            if (query.isBlank()) {
+                continuation.resume(HereResult.Ok(emptyGeoJson()))
+                return@suspendCancellableCoroutine
+            }
+
+            lastQuery.set(query)
+
+            val options = SearchOptions().apply {
+                languageCode = LanguageCode.EN_GB
+                maxItems = 6
+            }
+
+            val textQuery = TextQuery(query, TextQuery.Area(near))
+
+            val handle = searchEngine.suggestByText(textQuery, options) { error, suggestions ->
+                if (query != lastQuery.get()) return@suggestByText
+                if (!continuation.isActive) return@suggestByText
+
+                if (error != null) {
+                    if (error == SearchError.NO_RESULTS_FOUND) {
+                        continuation.resume(HereResult.Ok(emptyGeoJson()))
+                    } else {
+                        continuation.resume(HereResult.Err(searchErrorCode(error), searchErrorMessage(error)))
+                    }
+                    return@suggestByText
+                }
+
+                val features = suggestions.orEmpty().mapNotNull { s ->
+                    val place = s.place ?: return@mapNotNull null
+                    FeatureData(
+                        title = s.title,
+                        subtitle = place.address?.addressText.orEmpty(),
+                        placeId = place.id,
+                        lat = place.geoCoordinates?.latitude,
+                        lng = place.geoCoordinates?.longitude
+                    )
+                }
+
+                continuation.resume(HereResult.Ok(toGeoJson(features)))
+            }
+
+            continuation.invokeOnCancellation { handle?.cancel() }
+        }
+
+    suspend fun resolvePlace(placeId: String): HereResult<Map<String, Double>> =
+        suspendCancellableCoroutine { continuation ->
+            val query = PlaceIdQuery(placeId)
+
+            val handle = searchEngine.searchByPlaceId(query, LanguageCode.EN_GB) { error, place ->
+                if (!continuation.isActive) return@searchByPlaceId
+
+                if (error != null) {
+                    continuation.resume(HereResult.Err(searchErrorCode(error), searchErrorMessage(error)))
+                    return@searchByPlaceId
+                }
+
+                val coords = place?.geoCoordinates
+                if (coords == null) {
+                    continuation.resume(HereResult.Err("E_NO_RESULTS", "Could not resolve place coordinates."))
+                    return@searchByPlaceId
+                }
+
+                continuation.resume(HereResult.Ok(mapOf("lat" to coords.latitude, "lng" to coords.longitude)))
+            }
+
+            continuation.invokeOnCancellation { handle?.cancel() }
+        }
+}
+
+class RouteManager(private val mapView: MapView) {
+    private val routingEngine: RoutingEngine by lazy {
+        try {
+            RoutingEngine()
+        } catch (e: InstantiationErrorException) {
+            throw IllegalStateException("RoutingEngine init failed: ${e.error.name}", e)
+        }
+    }
+
+    private var currentRoutePolyline: MapPolyline? = null
+    private var destinationMarker: MapMarker? = null
+
+    suspend fun showRoute(from: GeoCoordinates, to: GeoCoordinates, mode: HereTransportMode): HereResult<Map<String, Any?>> {
+        return when (val result = calculateRoute(from, to, mode)) {
+            is HereResult.Ok -> {
+                drawRoute(result.value)
+                addDestinationMarker(to)
+                fitCameraToRoute(result.value)
+                HereResult.Ok(routeSummary(result.value))
+            }
+            is HereResult.Err -> result
+        }
+    }
+
+    suspend fun compareRoutes(from: GeoCoordinates, to: GeoCoordinates, modes: List<HereTransportMode>): HereResult<List<Map<String, Any?>>> {
+        val distinctModes = modes.distinct()
+        if (distinctModes.isEmpty()) return HereResult.Ok(emptyList())
+
+        return coroutineScope {
+            val deferreds = distinctModes.map { mode ->
+                async {
+                    when (val result = calculateRoute(from, to, mode)) {
+                        is HereResult.Ok -> routeSummary(result.value).plus("mode" to mode.name.lowercase())
+                        is HereResult.Err -> null
+                    }
+                }
+            }
+            HereResult.Ok(deferreds.awaitAll().filterNotNull())
+        }
+    }
+
+    fun clearRoute() {
+        currentRoutePolyline?.let { mapView.mapScene.removeMapPolyline(it) }
+        currentRoutePolyline = null
+        destinationMarker?.let { mapView.mapScene.removeMapMarker(it) }
+        destinationMarker = null
+    }
+
+    suspend fun calculateRoute(from: GeoCoordinates, to: GeoCoordinates, mode: HereTransportMode): HereResult<Route> =
+        suspendCancellableCoroutine { continuation ->
+            val waypoints = listOf(Waypoint(from), Waypoint(to))
+
+            val routeCallback = CalculateRouteCallback { error, routes ->
+                if (!continuation.isActive) return@CalculateRouteCallback
+                if (error != null) {
+                    continuation.resume(HereResult.Err(routingErrorCode(error), routingErrorMessage(error)))
+                    return@CalculateRouteCallback
+                }
+                val route = routes?.firstOrNull()
+                if (route == null) {
+                    continuation.resume(HereResult.Err("E_NO_ROUTE", "No route could be calculated between these points."))
+                    return@CalculateRouteCallback
+                }
+                continuation.resume(HereResult.Ok(route))
+            }
+
+            val routingOptions = RoutingOptions().apply {
+                transportSpecification = TransportSpecification().apply {
+                    transportMode = transportModeFor(mode)
+                }
+            }
+
+            val handle = routingEngine.calculateRoute(waypoints, routingOptions, routeCallback)
+            continuation.invokeOnCancellation { handle?.cancel() }
+        }
+
+    private fun drawRoute(route: Route) {
+        clearRoute()
+        val geoPolyline = route.geometry
+        val lineColor = Color.valueOf(1.0f, 0.34f, 0.13f, 1.0f)
+        val outlineColor = Color.valueOf(1.0f, 1.0f, 1.0f, 0.8f)
+        val lineWidth = try {
+            MapMeasureDependentRenderSize(RenderSize.Unit.PIXELS, 12.0)
+        } catch (e: MapMeasureDependentRenderSize.InstantiationException) {
+            Log.e("RouteManager", "render size failed", e); return
+        }
+        val outlineWidth = try {
+            MapMeasureDependentRenderSize(RenderSize.Unit.PIXELS, 16.0)
+        } catch (e: MapMeasureDependentRenderSize.InstantiationException) {
+            Log.e("RouteManager", "outline size failed", e); return
+        }
+        val representation = try {
+            MapPolyline.SolidRepresentation(lineWidth, lineColor, outlineWidth, outlineColor, LineCap.ROUND)
+        } catch (e: MapPolyline.Representation.InstantiationException) {
+            Log.e("RouteManager", "representation failed", e); return
+        }
+        val polyline = MapPolyline(geoPolyline, representation)
+        mapView.mapScene.addMapPolyline(polyline)
+        currentRoutePolyline = polyline
+    }
+
+    private fun addDestinationMarker(coordinates: GeoCoordinates) {
+        val image = createDotMarkerBitmap(24, 0xFFFF5722.toInt()) ?: return
+        val marker = MapMarker(coordinates, image, Anchor2D(0.5, 0.5))
+        mapView.mapScene.addMapMarker(marker)
+        destinationMarker = marker
+    }
+
+    private fun createDotMarkerBitmap(sizePx: Int, color: Int): MapImage? {
+        return try {
+            val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            paint.color = color
+            canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, paint)
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            MapImage(stream.toByteArray(), ImageFormat.PNG)
+        } catch (e: Exception) {
+            Log.e("RouteManager", "marker bitmap failed", e)
+            null
+        }
+    }
+
+    private fun fitCameraToRoute(route: Route) {
+        val geoBox = route.boundingBox
+        val orientation = GeoOrientationUpdate(0.0, 0.0)
+        // Fit route into the top ~43% of the MapView so it's visible above the half sheet
+        val padding = Rectangle2D(Point2D(0.05, 0.02), Size2D(0.90, 0.43))
+        mapView.camera.lookAt(geoBox, orientation, padding)
+    }
+}
+
+interface GuidanceEventListener {
+    fun onGuidanceProgress(remainingMeters: Int, etaSeconds: Long)
+    fun onManeuver(text: String)
+    fun onOffRoute(distanceFromRoute: Double)
+    fun onArrived()
+    fun onNavigableLocation(streetName: String?, speedLimit: Double?)
+}
+
+class GuidanceManager(
+    private val mapView: MapView,
+    private val locationIndicator: LocationIndicator
+) {
+    private val visualNavigator: VisualNavigator by lazy {
+        try {
+            VisualNavigator()
+        } catch (e: InstantiationErrorException) {
+            throw IllegalStateException("VisualNavigator init failed: ${e.error.name}", e)
+        }
+    }
+
+    private val locationEngine: LocationEngine by lazy {
+        try {
+            LocationEngine()
+        } catch (e: InstantiationErrorException) {
+            throw IllegalStateException("LocationEngine init failed: ${e.error.name}", e)
+        }
+    }
+
+    private var eventListener: GuidanceEventListener? = null
+    private var lastProgressEmitTime = 0L
+    private var lastStreetName: String? = null
+    private var currentSpeedLimit: Double? = null
+
+    private val locationListener = LocationListener { location ->
+        visualNavigator.onLocationUpdated(location)
+    }
+
+    fun setEventListener(listener: GuidanceEventListener?) {
+        eventListener = listener
+    }
+
+    fun startGuidance(route: Route) {
+        attachGuidanceListeners()
+        locationIndicator.locationIndicatorStyle = LocationIndicator.IndicatorStyle.NAVIGATION
+        visualNavigator.customLocationIndicator = locationIndicator
+        visualNavigator.route = route
+        visualNavigator.startRendering(mapView)
+        startPositioning()
+    }
+
+    fun stopGuidance() {
+        eventListener = null
+        locationEngine.stop()
+        locationEngine.removeLocationListener(locationListener)
+        visualNavigator.route = null
+        visualNavigator.stopRendering()
+        visualNavigator.customLocationIndicator = null
+        locationIndicator.locationIndicatorStyle = LocationIndicator.IndicatorStyle.PEDESTRIAN
+    }
+
+    private fun startPositioning() {
+        locationEngine.confirmHEREPrivacyNoticeInclusion()
+        locationEngine.addLocationListener(locationListener)
+        locationEngine.start(LocationAccuracy.NAVIGATION)
+    }
+
+    private fun attachGuidanceListeners() {
+        visualNavigator.routeProgressListener = RouteProgressListener { progress ->
+            val now = System.currentTimeMillis()
+            if (now - lastProgressEmitTime < 1000) return@RouteProgressListener
+            lastProgressEmitTime = now
+
+            val sectionProgress = progress.sectionProgress.lastOrNull() ?: return@RouteProgressListener
+            val remainingMeters = sectionProgress.remainingDistanceInMeters
+            val etaSeconds = sectionProgress.remainingDuration.seconds
+            eventListener?.onGuidanceProgress(remainingMeters, etaSeconds)
+        }
+
+        visualNavigator.eventTextListener = EventTextListener { eventText ->
+            val text = eventText.text
+            if (!text.isNullOrBlank()) eventListener?.onManeuver(text)
+        }
+
+        visualNavigator.roadTextsListener = RoadTextsListener { roadTexts ->
+            val streetName = roadTexts.names.defaultValue
+            if (streetName != null && streetName != lastStreetName) {
+                lastStreetName = streetName
+                eventListener?.onNavigableLocation(streetName, currentSpeedLimit)
+            }
+        }
+
+        visualNavigator.speedLimitListener = SpeedLimitListener { speedLimit ->
+            currentSpeedLimit = speedLimit.effectiveSpeedLimitInMetersPerSecond()
+        }
+
+        visualNavigator.routeDeviationListener = RouteDeviationListener { deviation ->
+            val current = deviation.currentLocation.originalLocation.coordinates
+            val lastOnRoute = deviation.lastLocationOnRoute?.originalLocation?.coordinates
+            val distance = if (lastOnRoute != null) current.distanceTo(lastOnRoute) else 0.0
+            eventListener?.onOffRoute(distance)
+        }
+
+        visualNavigator.destinationReachedListener = DestinationReachedListener {
+            eventListener?.onArrived()
+        }
+    }
+}

@@ -1,0 +1,70 @@
+import 'package:flutter/material.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+
+class CheckpointEmptyView extends StatelessWidget {
+  final String query;
+  final ContributionStatusEnum? status;
+
+  const CheckpointEmptyView({required this.query, this.status, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isSearch = query.isNotEmpty;
+
+    return SliverFillRemaining(
+      hasScrollBody: false,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(ThemeSpacing.sp10),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 64,
+                height: 64,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: ThemeColors.bgSubtle,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.shield_outlined,
+                    size: 28,
+                    color: ThemeColors.stone400,
+                  ),
+                ),
+              ),
+              const SizedBox(height: ThemeSpacing.sp5),
+              Text(
+                isSearch ? 'No matches for "$query"' : 'All clear',
+                style: const TextStyle(
+                  fontFamily: ThemeFonts.ui,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: ThemeColors.textPrimary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: ThemeSpacing.sp2),
+              Text(
+                isSearch
+                    ? 'Try a different search term or clear the filter.'
+                    : 'No checkpoints reported in this area.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontFamily: ThemeFonts.ui,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  height: 1.5,
+                  color: ThemeColors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

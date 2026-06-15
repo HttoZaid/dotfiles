@@ -9,7 +9,18 @@ vim.keymap.set("n", "<Left>", "<c-w>h")
 vim.keymap.set("n", "<Right>", "<c-w>l")
 
 vim.keymap.set("n", "<leader>cp", function()
-  require("util.preview").preview()
+    require("util.preview").preview()
 end, { desc = "Markdown Preview" })
 
 vim.keymap.set("n", "dm", ":execute 'delmarks '.nr2char(getchar())<cr>", { silent = true })
+
+-- Neovide zoom with auto font scaling
+if vim.g.neovide then
+    local function increase_scale(delta)
+        vim.g.neovide_scale_factor = vim.g.neovide_scale_factor + delta
+    end
+
+    vim.keymap.set("n", "<C-=>", function() increase_scale(0.1) end, { desc = "Zoom In" })
+    vim.keymap.set("n", "<C-->", function() increase_scale(-0.1) end, { desc = "Zoom Out" })
+    vim.keymap.set("n", "<C-0>", function() vim.g.neovide_scale_factor = 0.3 end, { desc = "Reset Zoom" })
+end

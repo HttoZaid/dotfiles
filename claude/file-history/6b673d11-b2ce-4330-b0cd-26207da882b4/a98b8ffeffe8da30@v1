@@ -1,0 +1,381 @@
+"use client";
+
+import { useProfile } from "@/components/profile-provider";
+import { Guard } from "@/components/shared/guard";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarSeparator,
+} from "@/components/ui/sidebar";
+import { useI18n, useLocale } from "@/i18n/client-provider";
+import { Capability } from "@/lib/permissions";
+import {
+  BuildingsIcon,
+  ChalkboardTeacherIcon,
+  ChartBarIcon,
+  GearIcon,
+  HouseIcon,
+  ListChecksIcon,
+  MoonIcon,
+  PlayCircleIcon,
+  SignOutIcon,
+  StackIcon,
+  SunIcon,
+  TargetIcon,
+  TranslateIcon,
+  UserIcon,
+  VideoCameraIcon,
+} from "@phosphor-icons/react";
+import { useTheme } from "next-themes";
+import Image from "next/image";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+type NavItem = {
+  title: string;
+  description?: string;
+  url: string;
+  icon: React.ComponentType<{
+    size?: number;
+    weight?: "fill" | "regular" | "duotone";
+  }>;
+  cap?: Capability | Capability[];
+  matchPrefix?: boolean;
+};
+
+const LESSON_READ_CAPS: Capability[] = [
+  "lessons.read.own",
+  "lessons.read.school",
+  "lessons.read.organization",
+];
+
+const RTL_LOCALES = ["ar", "he", "fa", "ur"];
+
+export function AppSidebar() {
+  const t = useI18n();
+  const currentLocale = useLocale();
+  const router = useRouter();
+  const { profile, logout } = useProfile();
+  const pathname = usePathname();
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isRtl = RTL_LOCALES.includes(currentLocale);
+  const nav = t.sidebar.navigation;
+  const desc = nav.descriptions;
+
+  const navItems: NavItem[] = [
+    {
+      title: nav.overview,
+      description: desc?.overview,
+      url: "/overview",
+      icon: HouseIcon,
+    },
+    {
+      title: nav.lessons,
+      description: desc?.lessons,
+      url: "/lessons",
+      icon: PlayCircleIcon,
+      cap: LESSON_READ_CAPS,
+    },
+    {
+      title: nav.analytics,
+      description: desc?.analytics,
+      url: "/analytics",
+      icon: ChartBarIcon,
+      cap: LESSON_READ_CAPS,
+    },
+    {
+      title: nav.upload_lesson,
+      description: desc?.upload_lesson,
+      url: "/lessons/upload",
+      icon: VideoCameraIcon,
+      cap: "lessons.upload",
+      matchPrefix: true,
+    },
+    {
+      title: nav.rubric,
+      description: desc?.rubric,
+      url: "/rubric",
+      icon: ListChecksIcon,
+    },
+  ];
+
+  const teacherNavItems: NavItem[] = [
+    {
+      title: nav.action_plans,
+      description: desc?.action_plans,
+      url: "/action-plans",
+      icon: TargetIcon,
+    },
+  ];
+
+  const schoolItems: NavItem[] = [
+    {
+      title: nav.school_management.action_plans,
+      description: desc?.action_plans,
+      url: "/action-plans",
+      icon: TargetIcon,
+      cap: ["schools.manage.own"],
+    },
+    {
+      title: nav.school_management.staff,
+      description: desc?.staff,
+      url: "/school/staff",
+      icon: ChalkboardTeacherIcon,
+      cap: ["schools.manage.own"],
+    },
+    {
+      title: nav.school_management.structure,
+      description: desc?.structure,
+      url: "/school/structure",
+      icon: StackIcon,
+      cap: ["schools.manage.own"],
+    },
+    {
+      title: nav.school_management.profile,
+      description: desc?.profile,
+      url: "/school/profile",
+      icon: BuildingsIcon,
+      cap: ["schools.manage.own"],
+    },
+  ];
+
+  const organizationItems: NavItem[] = [
+    {
+      title: nav.organization.overview,
+      description: desc?.organization,
+      url: "/organization",
+      icon: BuildingsIcon,
+      cap: ["organization.manage"],
+      matchPrefix: true,
+    },
+    {
+      title: nav.organization.settings,
+      description: desc?.organization_settings,
+      url: "/organization/settings",
+      icon: GearIcon,
+      cap: ["organization.manage"],
+    },
+  ];
+
+  const toggleLanguage = (newLocale: string) => {
+    document.cookie = `NEXT_LOCALE=${newLocale}; path=/; max-age=31536000; SameSite=Lax`;
+    router.refresh();
+  };
+
+  const isActive = (item: NavItem): boolean => {
+    if (item.matchPrefix) {
+      if (item.url === "/lessons/upload") {
+        return pathname.startsWith("/lessons/upload");
+      }
+      if (item.url === "/organization") {
+        return (
+          pathname === "/organization" ||
+          (pathname.startsWith("/organization/") &&
+            !pathname.startsWith("/organization/settings"))
+        );
+      }
+      return pathname === item.url || pathname.startsWith(`${item.url}/`);
+    }
+    if (item.url === "/lessons") {
+      return (
+        pathname === "/lessons" ||
+        (pathname.startsWith("/lessons/") &&
+          !pathname.startsWith("/lessons/upload"))
+      );
+    }
+    return pathname === item.url;
+  };
+
+  const renderItem = (item: NavItem) => {
+    const active = isActive(item);
+    const node = (
+      <SidebarMenuItem key={item.url}>
+        <SidebarMenuButton
+          asChild
+          isActive={active}
+          tooltip={item.title}
+          className="h-auto py-2 [&>svg]:size-[16px]"
+        >
+          <Link href={item.url} className="flex items-start gap-3">
+            <item.icon size={16} weight={active ? "fill" : "regular"} />
+            <div className="flex min-w-0 flex-col">
+              <span className="text-[13px] font-medium leading-tight">
+                {item.title}
+              </span>
+              {item.description && (
+                <span className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground/70">
+                  {item.description}
+                </span>
+              )}
+            </div>
+          </Link>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+
+    return item.cap ? (
+      <Guard key={item.url} cap={item.cap}>
+        {node}
+      </Guard>
+    ) : (
+      node
+    );
+  };
+
+  return (
+    <div className="dark contents">
+      <Sidebar
+        collapsible="offcanvas"
+        variant="inset"
+        side={isRtl ? "right" : "left"}
+      >
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <div className="flex items-center gap-3 px-3 py-4">
+                <Image src="/favicon.ico" alt="Logo" width={24} height={24} />
+                <span className="text-lg font-bold tracking-tight text-foreground">
+                  Learnalyze
+                </span>
+              </div>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarMenu className="gap-1">
+              {navItems.map(renderItem)}
+              {profile?.role === "teacher" &&
+                teacherNavItems.map(renderItem)}
+            </SidebarMenu>
+          </SidebarGroup>
+
+          <Guard cap={["schools.manage.own"]}>
+            <SidebarGroup>
+              <SidebarGroupLabel className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+                {nav.school_management.title}
+              </SidebarGroupLabel>
+
+              <SidebarMenu className="gap-1">
+                {schoolItems.map(renderItem)}
+              </SidebarMenu>
+            </SidebarGroup>
+          </Guard>
+
+          <Guard cap={["organization.manage"]}>
+            <SidebarGroup>
+              <SidebarGroupLabel className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+                {nav.organization.title}
+              </SidebarGroupLabel>
+
+              <SidebarMenu className="gap-1">
+                {organizationItems.map(renderItem)}
+              </SidebarMenu>
+            </SidebarGroup>
+          </Guard>
+        </SidebarContent>
+
+        <SidebarFooter>
+          <SidebarGroup>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() =>
+                    toggleLanguage(currentLocale === "en" ? "ar" : "en")
+                  }
+                  className="text-[13px]"
+                >
+                  <TranslateIcon size={16} />
+                  <span>{currentLocale === "en" ? "العربية" : "English"}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+                  className="text-[13px]"
+                >
+                  {mounted && (
+                    <>
+                      {theme === "light" ? (
+                        <MoonIcon size={16} />
+                      ) : (
+                        <SunIcon size={16} />
+                      )}
+                      <span className="capitalize">
+                        {theme === "light" ? "Dark Mode" : "Light Mode"}
+                      </span>
+                    </>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+
+          <SidebarSeparator className="mx-1" />
+
+          <SidebarGroup>
+            <SidebarMenu className="gap-2">
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname === "/profile"}
+                  className="h-auto py-2 data-[active=true]:bg-sidebar-accent"
+                >
+                  <Link href="/profile" className="flex items-center gap-3">
+                    <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/20 bg-primary/10 text-primary">
+                      {profile?.avatar_url ? (
+                        <img
+                          src={profile.avatar_url}
+                          alt=""
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <UserIcon size={16} weight="duotone" />
+                      )}
+                    </div>
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-[13px] font-semibold leading-tight text-foreground">
+                        {profile?.display_name}
+                      </span>
+                      <span className="mt-0.5 truncate text-[10px] uppercase leading-tight tracking-wider text-muted-foreground/80">
+                        {profile?.role?.replace("_", " ")}
+                      </span>
+                    </div>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => logout()}
+                  className="text-[13px] text-muted-foreground transition-colors hover:text-destructive"
+                >
+                  <SignOutIcon size={16} />
+                  <span>{nav.sign_out}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+    </div>
+  );
+}

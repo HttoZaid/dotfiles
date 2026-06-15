@@ -1,0 +1,360 @@
+"use server";
+
+import { getT } from "@/i18n/server";
+import { createClient } from "@/lib/supabase/server";
+import { ActionStateResponse } from "@/types/actions";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { pushNotification } from "@/features/notifications/_lib/push";
+import { sendEmail } from "@/lib/email";
+import { getUserProfileServer } from "../../_queries";
+import { getInviteSchema } from "../_lib/invitation-schema";
+import { Role } from "../_lib/types";
+
+const TOKEN_BYTES = 32;
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+type ProfileForInvite = {
+  role: string | null;
+  school_id: string | null;
+  organization_id: string | null;
+};
+
+type ResolveSchoolResult =
+  | {
+      ok: true;
+      school_id: string | null;
+      organization_id: string | null;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+function randomToken(): string {
+  const arr = new Uint8Array(TOKEN_BYTES);
+  crypto.getRandomValues(arr);
+  return Buffer.from(arr).toString("base64url");
+}
+
+function canInviteRole(inviter: Role, target: Role): boolean {
+  if (inviter === "org_admin") return true;
+
+  if (inviter === "principal") {
+    return target === "teacher" || target === "head_of_department";
+  }
+
+  return false;
+}
+
+async function resolveSchoolId(
+  supabase: SupabaseClient,
+  profile: ProfileForInvite,
+  explicitSchoolId: string | null,
+  isOrgInvite: boolean,
+  errCopy: {
+    no_school: string;
+    no_organization: string;
+    no_permission: string;
+  },
+): Promise<ResolveSchoolResult> {
+  if (isOrgInvite) {
+    if (!profile.organization_id) {
+      return { ok: false, message: errCopy.no_organization };
+    }
+
+    return {
+      ok: true,
+      school_id: null,
+      organization_id: profile.organization_id,
+    };
+  }
+
+  if (profile.role === "principal") {
+    if (!profile.school_id) {
+      return { ok: false, message: errCopy.no_school };
+    }
+
+    if (explicitSchoolId && explicitSchoolId !== profile.school_id) {
+      return { ok: false, message: errCopy.no_permission };
+    }
+
+    return {
+      ok: true,
+      school_id: profile.school_id,
+      organization_id: null,
+    };
+  }
+
+  if (profile.role === "org_admin") {
+    if (!explicitSchoolId) {
+      return { ok: false, message: errCopy.no_school };
+    }
+
+    const { data: school } = await supabase
+      .from("schools")
+      .select("id, organization_id")
+      .eq("id", explicitSchoolId)
+      .maybeSingle();
+
+    if (!school) {
+      return { ok: false, message: errCopy.no_school };
+    }
+
+    if (school.organization_id !== profile.organization_id) {
+      return { ok: false, message: errCopy.no_permission };
+    }
+
+    return {
+      ok: true,
+      school_id: explicitSchoolId,
+      organization_id: null,
+    };
+  }
+
+  return { ok: false, message: errCopy.no_permission };
+}
+
+export async function sendInvitationAction(
+  _prev: ActionStateResponse<{ id: string; token: string } | null>,
+  formData: FormData,
+): Promise<ActionStateResponse<{ id: string; token: string } | null>> {
+  const t = await getT();
+  const errCopy = t.dashboard.school.schoolStaff.errors;
+  const valCopy = t.dashboard.school.schoolStaff.invite_dialog.validation;
+  const supabase = await createClient();
+
+  const grades = formData.getAll("grades").map((grade) => String(grade));
+
+  const explicitSchoolId = formData.get("school_id")
+    ? String(formData.get("school_id"))
+    : null;
+
+  const values = {
+    email: formData.get("email"),
+    role: formData.get("role"),
+    department_name: formData.get("department_name") || null,
+    subject_name: formData.get("subject_name") || null,
+    phase_name: formData.get("phase_name") || null,
+    grades,
+  };
+
+  const validate = getInviteSchema(t).safeParse(values);
+
+  if (!validate.success) {
+    return {
+      success: false,
+      message: "",
+      errors: z.flattenError(validate.error).fieldErrors,
+    };
+  }
+
+  try {
+    const { user, profile } = await getUserProfileServer();
+
+    if (!user) {
+      return { success: false, message: errCopy.session_expired };
+    }
+
+    if (!profile?.role) {
+      return { success: false, message: errCopy.no_permission };
+    }
+
+    if (!canInviteRole(profile.role as Role, validate.data.role as Role)) {
+      return { success: false, message: errCopy.cannot_invite_role };
+    }
+
+    if (profile.email?.toLowerCase() === validate.data.email) {
+      return { success: false, message: errCopy.self_invite };
+    }
+
+    const isOrgInvite = validate.data.role === "org_admin";
+
+    const resolved = await resolveSchoolId(
+      supabase,
+      profile,
+      explicitSchoolId,
+      isOrgInvite,
+      errCopy,
+    );
+
+    if (!resolved.ok) {
+      return { success: false, message: resolved.message };
+    }
+
+    const { school_id, organization_id } = resolved;
+
+    const inviterDisplayName = (profile as Record<string, unknown>).display_name as string | undefined
+      ?? profile.email
+      ?? "A colleague";
+    let schoolName = "your school";
+
+    if (school_id) {
+      const { data: sch } = await supabase
+        .from("schools")
+        .select("name")
+        .eq("id", school_id)
+        .maybeSingle();
+      if (sch?.name) schoolName = sch.name;
+    }
+
+    if (school_id) {
+      const { data: existingMember } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("school_id", school_id)
+        .ilike("email", validate.data.email)
+        .maybeSingle();
+
+      if (existingMember) {
+        return {
+          success: false,
+          message: "",
+          errors: { email: [valCopy.email_already_member] },
+        };
+      }
+
+      const { data: existingInvitation } = await supabase
+        .from("invitations")
+        .select("id, status")
+        .eq("school_id", school_id)
+        .ilike("email", validate.data.email)
+        .in("status", ["pending", "accepted"])
+        .maybeSingle();
+
+      if (existingInvitation) {
+        return {
+          success: false,
+          message: "",
+          errors: {
+            email: [
+              existingInvitation.status === "accepted"
+                ? valCopy.email_already_member
+                : valCopy.email_already_invited,
+            ],
+          },
+        };
+      }
+
+      if (validate.data.role === "principal") {
+        const { data: existingPrincipal } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("school_id", school_id)
+          .eq("role", "principal")
+          .maybeSingle();
+
+        if (existingPrincipal) {
+          return {
+            success: false,
+            message: errCopy.school_already_has_principal,
+          };
+        }
+      }
+    }
+
+    const token = randomToken();
+    const expires_at = new Date(Date.now() + 7 * 86400000).toISOString();
+
+    const { data: invitation, error } = await supabase
+      .from("invitations")
+      .insert({
+        school_id,
+        organization_id,
+        email: validate.data.email,
+        role: validate.data.role,
+        department_name: validate.data.department_name ?? null,
+        subject_name: validate.data.subject_name ?? null,
+        phase_name: validate.data.phase_name ?? null,
+        invited_by: user.id,
+        token,
+        expires_at,
+      })
+      .select("id, token")
+      .single();
+
+    if (error || !invitation) {
+      const message = error?.message?.includes("not_found")
+        ? errCopy.member_not_found
+        : errCopy.internal_error;
+
+      return { success: false, message };
+    }
+
+    if (validate.data.grades?.length) {
+      const { error: gradesError } = await supabase
+        .from("invitation_grades")
+        .insert(
+          validate.data.grades.map((grade_name) => ({
+            invitation_id: invitation.id,
+            grade_name,
+          })),
+        );
+
+      if (gradesError) {
+        const message = gradesError.message.includes("not_found")
+          ? errCopy.member_not_found
+          : errCopy.internal_error;
+
+        return { success: false, message };
+      }
+    }
+
+    revalidatePath("/school/staff");
+
+    if (school_id) {
+      revalidatePath(`/organization/${school_id}/staff`);
+    }
+
+    const roleLabel = validate.data.role
+      ? validate.data.role.replace(/_/g, " ")
+      : "staff member";
+    const departmentDetail = validate.data.department_name
+      ? `<p><strong>Department:</strong> ${validate.data.department_name}</p>`
+      : "";
+    const subjectDetail = validate.data.subject_name
+      ? `<p><strong>Subject:</strong> ${validate.data.subject_name}</p>`
+      : "";
+    const inviteLink = `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/accept-invite?token=${token}`;
+
+    void sendEmail({
+      to: validate.data.email,
+      subject: `${inviterDisplayName} invited you to join ${schoolName} on Learnalyze`,
+      templateName: "invitation",
+      vars: {
+        inviter_name: inviterDisplayName,
+        school_name: schoolName,
+        role: roleLabel,
+        invite_link: inviteLink,
+        department_detail: departmentDetail,
+        subject_detail: subjectDetail,
+      },
+    }).catch((err) => {
+      console.error("sendInvitationAction: email failed", { email: validate.data.email, error: err instanceof Error ? err.message : err });
+    });
+
+    void pushNotification({
+      userId: user.id,
+      kind: "invitation_sent",
+      tone: "success",
+      title: `Invitation sent to ${validate.data.email}`,
+      subtitle: `${roleLabel} at ${schoolName}`,
+      link: "/school/staff",
+    });
+
+    return {
+      success: true,
+      message: null,
+      data: { id: invitation.id, token: invitation.token },
+    };
+  } catch (error) {
+    console.error("sendInvitationAction:", error);
+
+    if (error instanceof Error && error.message.includes("not_found")) {
+      return { success: false, message: errCopy.member_not_found };
+    }
+
+    return { success: false, message: errCopy.internal_error };
+  }
+}

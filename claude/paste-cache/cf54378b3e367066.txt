@@ -1,0 +1,10 @@
+ GET /school/analytics 200 in 1464ms (next.js: 3ms, proxy.ts: 129ms, application-code: 1332ms)
+[browser] Image with src "/favicon.ico" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+[browser] Runtime Error: Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  <... schoolName=... data={{...}} getTeacherHref={function getTeacherHref} aiSummarySlot=...>
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+    at stringify (<anonymous>:1:18) (src/app/error.tsx:18:12)
+[browser] Runtime Error: Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  <... schoolName=... data={{...}} getTeacherHref={function getTeacherHref} aiSummarySlot=...>
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+    at stringify (<anonymous>:1:18) (src/app/error.tsx:18:12)

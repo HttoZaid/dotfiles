@@ -1,0 +1,61 @@
+import { formatDistance, formatDuration, formatEta } from "@/features/navigation/lib/format-route";
+import type { RouteSummary } from "expo-here-maps";
+import { Navigation } from "lucide-react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import Animated, { FadeInUp } from "react-native-reanimated";
+
+type RouteSummaryCardProps = {
+	summary: RouteSummary;
+	isStarting?: boolean;
+	onStart: () => void;
+	onClear: () => void;
+};
+
+export function RouteSummaryCard({
+	summary,
+	isStarting = false,
+	onStart,
+	onClear,
+}: RouteSummaryCardProps) {
+	return (
+		<Animated.View entering={FadeInUp.duration(240)} className="gap-4">
+			<View className="overflow-hidden rounded-3xl border border-border bg-card">
+				<View className="flex-row items-center justify-between px-5 py-4">
+					<View>
+						<Text className="text-[28px] font-bold leading-tight text-foreground">
+							{formatDuration(summary.durationSeconds)}
+						</Text>
+						<Text className="text-[15px] text-muted-foreground">
+							{formatDistance(summary.distanceMeters)}
+							{"  ·  Arrive "}
+							{formatEta(summary.durationSeconds)}
+						</Text>
+					</View>
+					<Pressable
+						onPress={onClear}
+						hitSlop={10}
+						disabled={isStarting}
+						className="active:opacity-50"
+					>
+						<View className="h-9 w-9 items-center justify-center rounded-full bg-muted">
+							<Text className="text-[17px] font-medium text-muted-foreground">✕</Text>
+						</View>
+					</Pressable>
+				</View>
+			</View>
+
+			<Pressable onPress={onStart} disabled={isStarting} className="active:opacity-90">
+				<View className="flex-row items-center justify-center gap-2.5 rounded-2xl bg-primary py-4">
+					{isStarting ? (
+						<ActivityIndicator size="small" color="white" />
+					) : (
+						<Navigation size={20} className="text-primary-foreground" fill="currentColor" />
+					)}
+					<Text className="text-[16px] font-semibold text-primary-foreground">
+						{isStarting ? "Starting…" : "Start"}
+					</Text>
+				</View>
+			</Pressable>
+		</Animated.View>
+	);
+}

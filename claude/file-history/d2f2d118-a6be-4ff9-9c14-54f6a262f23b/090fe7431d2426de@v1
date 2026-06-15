@@ -1,0 +1,218 @@
+package expo.modules.heremaps
+
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.util.Log
+import android.widget.FrameLayout
+import com.here.sdk.core.GeoCoordinates
+import com.here.sdk.core.GeoCoordinatesUpdate
+import com.here.sdk.core.GeoOrientationUpdate
+import com.here.sdk.core.Location
+import com.here.sdk.core.engine.AuthenticationMode
+import com.here.sdk.core.engine.SDKNativeEngine
+import com.here.sdk.core.engine.SDKOptions
+import com.here.sdk.mapview.LocationIndicator
+import com.here.sdk.mapview.MapCameraAnimationFactory
+import com.here.sdk.mapview.MapScheme
+import com.here.sdk.mapview.MapView
+import com.here.time.Duration
+import expo.modules.kotlin.AppContext
+import expo.modules.kotlin.exception.CodedException
+import expo.modules.kotlin.viewevent.EventDispatcher
+import expo.modules.kotlin.views.ExpoView
+
+class HereMapsView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+
+    private var mapView: MapView? = null
+    internal val controls = MapControls(null)
+
+    lateinit var searchManager: SearchManager
+    lateinit var routeManager: RouteManager
+    lateinit var guidanceManager: GuidanceManager
+    private lateinit var locationIndicator: LocationIndicator
+
+    val onMapError by EventDispatcher<Map<String, String>>()
+    val onGuidanceProgress by EventDispatcher<Map<String, Any?>>()
+    val onManeuver by EventDispatcher<Map<String, Any?>>()
+    val onOffRoute by EventDispatcher<Map<String, Any?>>()
+    val onArrived by EventDispatcher<Map<String, Any?>>()
+    val onNavigableLocation by EventDispatcher<Map<String, Any?>>()
+
+    private var ready = false
+    private var pendingCenter: Triple<Double, Double, Boolean>? = null
+    private var pendingBearing: Double? = null
+    private var pendingTilt: Double? = null
+
+    companion object {
+        private const val TAG = "HereMapsView"
+    }
+
+    init {
+        try {
+            initEngine(context)
+            val mv = MapView(context)
+            mv.onCreate(null)
+            mv.onResume()
+
+            mv.mapScene.loadScene(MapScheme.NORMAL_DAY) { mapError ->
+                if (mapError == null) {
+                    ready = true
+                    applyPending()
+                } else {
+                    onMapError(mapOf("code" to "E_SCENE_LOAD", "message" to "Failed to load map scene: ${mapError.name}"))
+                }
+            }
+
+            mapView = mv
+            controls.updateView(mv)
+
+            locationIndicator = LocationIndicator()
+            locationIndicator.locationIndicatorStyle = LocationIndicator.IndicatorStyle.PEDESTRIAN
+            locationIndicator.isActive = false
+            locationIndicator.enable(mv)
+
+            searchManager = SearchManager()
+            routeManager = RouteManager(mv)
+            guidanceManager = GuidanceManager(mv, locationIndicator)
+
+            seedLastKnownLocation()
+
+            guidanceManager.setEventListener(object : GuidanceEventListener {
+                override fun onGuidanceProgress(remainingMeters: Int, etaSeconds: Long) {
+                    onGuidanceProgress(mapOf("remainingMeters" to remainingMeters, "etaSeconds" to etaSeconds))
+                }
+                override fun onManeuver(text: String) {
+                    onManeuver(mapOf("text" to text))
+                }
+                override fun onOffRoute(distanceFromRoute: Double) {
+                    onOffRoute(mapOf("distanceFromRoute" to distanceFromRoute))
+                }
+                override fun onArrived() {
+                    onArrived(emptyMap())
+                }
+                override fun onNavigableLocation(streetName: String?, speedLimit: Double?) {
+                    onNavigableLocation(mapOf("streetName" to streetName, "speedLimit" to speedLimit))
+                }
+            })
+
+            addView(mv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        } catch (e: CodedException) {
+            Log.e(TAG, "[${e.code}] ${e.message}", e.cause)
+            onMapError(mapOf("code" to e.code, "message" to (e.message ?: "Unknown init error")))
+        } catch (e: Exception) {
+            Log.e(TAG, "[E_VIEW_INIT] ${e.message}", e)
+            onMapError(mapOf("code" to "E_VIEW_INIT", "message" to (e.message ?: "Failed to create HERE Maps view")))
+        }
+    }
+
+    fun setMapCenter(lat: Double, lng: Double, animated: Boolean = false) {
+        if (!ready) { pendingCenter = Triple(lat, lng, animated); return }
+        val mv = mapView ?: return
+        if (animated) {
+            val update = GeoCoordinatesUpdate(GeoCoordinates(lat, lng))
+            val anim = MapCameraAnimationFactory.flyTo(update, 1.0, Duration.ofSeconds(1))
+            mv.camera.startAnimation(anim)
+        } else {
+            mv.camera.lookAt(GeoCoordinates(lat, lng))
+        }
+    }
+
+    fun setBearing(bearing: Double) {
+        if (!ready) { pendingBearing = bearing; return }
+        val mv = mapView ?: return
+        val state = mv.camera.state
+        mv.camera.setOrientationAtTarget(GeoOrientationUpdate(bearing, state.orientationAtTarget.tilt))
+    }
+
+    fun setTilt(tilt: Double) {
+        if (!ready) { pendingTilt = tilt; return }
+        val mv = mapView ?: return
+        val state = mv.camera.state
+        mv.camera.setOrientationAtTarget(GeoOrientationUpdate(state.orientationAtTarget.bearing, tilt))
+    }
+
+    fun onResume() { mapView?.onResume() }
+    fun onPause() { mapView?.onPause() }
+
+    fun updateUserLocation(lat: Double, lng: Double, bearing: Double?) {
+        if (!::locationIndicator.isInitialized) return
+        val location = Location(GeoCoordinates(lat, lng))
+        bearing?.let { location.bearingInDegrees = it }
+        locationIndicator.updateLocation(location)
+        locationIndicator.isActive = true
+    }
+
+    private fun seedLastKnownLocation() {
+        try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.FUSED_PROVIDER
+            )
+            for (provider in providers) {
+                val lastKnown = lm.getLastKnownLocation(provider) ?: continue
+                val location = Location(GeoCoordinates(lastKnown.latitude, lastKnown.longitude))
+                if (lastKnown.bearing != 0f) location.bearingInDegrees = lastKnown.bearing.toDouble()
+                locationIndicator.updateLocation(location)
+                locationIndicator.isActive = true
+                break
+            }
+        } catch (e: SecurityException) {
+            log("Location permission not granted, skipping seed")
+        } catch (e: Exception) {
+            log("Seed failed: ${e.message}")
+        }
+    }
+
+    fun onDestroy() {
+        ready = false
+        if (::guidanceManager.isInitialized) guidanceManager.stopGuidance()
+        if (::routeManager.isInitialized) routeManager.clearRoute()
+        if (::locationIndicator.isInitialized) locationIndicator.disable()
+        mapView?.let {
+            it.onPause()
+            it.onDestroy()
+        }
+        mapView = null
+        controls.updateView(null)
+    }
+
+    private fun applyPending() {
+        pendingCenter?.let { (lat, lng, animated) -> setMapCenter(lat, lng, animated); pendingCenter = null }
+        pendingBearing?.let { setBearing(it); pendingBearing = null }
+        pendingTilt?.let { setTilt(it); pendingTilt = null }
+    }
+
+    private fun initEngine(context: Context) {
+        if (SDKNativeEngine.getSharedInstance() != null) return
+
+        val appInfo = context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
+        val bundle = appInfo.metaData
+        val accessKeyID = bundle?.getString("HERE_ACCESS_KEY_ID") ?: ""
+        val accessKeySecret = bundle?.getString("HERE_ACCESS_KEY_SECRET") ?: ""
+
+        if (accessKeyID.isEmpty() || accessKeySecret.isEmpty()) {
+            throw CodedException(
+                "E_NO_CREDENTIALS",
+                "HERE SDK credentials missing from AndroidManifest. Check .env has HERE_ACCESS_KEY_ID and HERE_ACCESS_KEY_SECRET, then run: bunx expo prebuild --clean",
+                null
+            )
+        }
+
+        try {
+            SDKNativeEngine.makeSharedInstance(
+                context,
+                SDKOptions(AuthenticationMode.withKeySecret(accessKeyID, accessKeySecret))
+            )
+        } catch (e: Exception) {
+            throw CodedException("E_ENGINE_INIT", "Failed to initialize HERE SDK engine — likely invalid or expired credentials: ${e.message}", e)
+        }
+    }
+
+    private fun log(msg: String) { Log.i(TAG, msg) }
+}

@@ -1,0 +1,18 @@
+export function formatDistance(meters: number): string {
+	if (meters < 1000) return `${Math.round(meters)} m`;
+	const km = meters / 1000;
+	return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+}
+
+export function formatDuration(seconds: number): string {
+	const mins = Math.round(seconds / 60);
+	if (mins < 60) return `${mins} min`;
+	const hours = Math.floor(mins / 60);
+	const rem = mins % 60;
+	return rem === 0 ? `${hours} hr` : `${hours} hr ${rem} min`;
+}
+
+export function formatEta(seconds: number): string {
+	const arrival = new Date(Date.now() + seconds * 1000);
+	return arrival.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}

@@ -1,0 +1,66 @@
+#pragma once
+
+#include "../crypto/crypto.hpp"
+#include "session_store.hpp"
+#include <cstdint>
+#include <iostream>
+#include <optional>
+
+namespace WAWP::Store {
+
+class MemorySessionStore : public Store::SessionStore {
+
+public:
+	MemorySessionStore() = default;
+
+	std::optional<Crypto::KeyPair> get_noise_key_pair() override {
+		std::cout << "[Session] Pulling noise key pair.\n";
+		return noise_key_pair_;
+	}
+
+	void set_noise_key_pair(const Crypto::KeyPair& key_pair) override {
+		std::cout << "[Session] Saving noise key pair.\n";
+		noise_key_pair_ = key_pair;
+	}
+
+	// --- Registration ID ---
+	std::optional<uint32_t> get_registration_id() override {
+		std::cout << "[Session] Pulling registration ID.\n";
+		return registration_id_;
+	}
+
+	void set_registration_id(uint32_t reg_id) override {
+		std::cout << "[Session] Saving registration ID.\n";
+		registration_id_ = reg_id;
+	}
+
+	// --- Master Identity Key ---
+	std::optional<Crypto::IdentityKeyPair> get_identity_key_pair() override {
+		std::cout << "[Session] Pulling identity key pair.\n";
+		return identity_key_pair_;
+	}
+
+	void set_identity_key_pair(const Crypto::IdentityKeyPair& identity) override {
+		std::cout << "[Session] Saving identity key pair.\n";
+		identity_key_pair_ = identity;
+	}
+
+	// --- Signed PreKey ---
+	std::optional<Crypto::SignedPreKey> get_signed_pre_key() override {
+		std::cout << "[Session] Pulling signed prekey.\n";
+		return signed_pre_key_;
+	}
+
+	void set_signed_pre_key(const Crypto::SignedPreKey& spk) override {
+		std::cout << "[Session] Saving signed prekey.\n";
+		signed_pre_key_ = spk;
+	}
+
+private:
+	std::optional<uint32_t> registration_id_;
+	std::optional<Crypto::KeyPair> noise_key_pair_;
+	std::optional<Crypto::IdentityKeyPair> identity_key_pair_;
+	std::optional<Crypto::SignedPreKey> signed_pre_key_;
+};
+
+} // namespace WAWP::Store

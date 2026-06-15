@@ -1,0 +1,22 @@
+import 'package:flutter/material.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_focus_button.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_orientation_button.dart';
+import 'package:ukcheckpoints_app/features/map/widgets/map_view_switcher_button.dart';
+
+class MapOverlayButtons extends StatelessWidget {
+  const MapOverlayButtons({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MapViewSwitcherButton(),
+        SizedBox(height: 8),
+        MapOrientationButton(),
+        SizedBox(height: 8),
+        MapFocusButton(),
+      ],
+    );
+  }
+}

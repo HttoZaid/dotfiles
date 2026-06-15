@@ -1,0 +1,40 @@
+import { escHtml, renderTemplate } from "../_lib/render";
+
+export type ActionPlanReminderEmailArgs = {
+  to: string;
+  teacherName: string;
+  goalText: string;
+  focusArea: string;
+  daysRemaining: number;
+  actionPlansLink: string;
+};
+
+export async function buildActionPlanReminderEmail(
+  args: ActionPlanReminderEmailArgs,
+): Promise<{ subject: string; html: string }> {
+  const daysLabel =
+    args.daysRemaining === 1
+      ? "1 day remaining"
+      : `${args.daysRemaining} days remaining`;
+
+  const urgencyColor =
+    args.daysRemaining <= 3
+      ? "#ef4444"
+      : args.daysRemaining <= 7
+        ? "#f59e0b"
+        : "#44c5a0";
+
+  const html = await renderTemplate("action-plan-reminder", {
+    teacher_name: escHtml(args.teacherName),
+    goal_text: escHtml(args.goalText),
+    focus_area: escHtml(args.focusArea),
+    days_label: escHtml(daysLabel),
+    urgency_color: urgencyColor,
+    action_plans_link: args.actionPlansLink,
+  });
+
+  return {
+    subject: `Goal reminder: ${args.focusArea} — ${daysLabel}`,
+    html,
+  };
+}

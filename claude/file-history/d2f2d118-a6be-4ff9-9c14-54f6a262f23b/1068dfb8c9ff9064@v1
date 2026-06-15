@@ -1,0 +1,178 @@
+import { useCurrentLocation } from "@/features/location/use-current-location";
+import type {
+	GeoJsonFeature,
+	HereMapsViewRef,
+	LatLng,
+	RouteSummary,
+} from "expo-here-maps";
+import { type RefObject, useCallback, useState } from "react";
+import { useSearch } from "./use-search";
+
+export type RoutePoint = {
+	label: string;
+	coords: LatLng | null;
+	isCurrentLocation: boolean;
+};
+
+export type ActiveField = "origin" | "destination" | null;
+
+const CURRENT_LOCATION: RoutePoint = {
+	label: "Current location",
+	coords: null,
+	isCurrentLocation: true,
+};
+
+export function useRouteSearch(mapRef: RefObject<HereMapsViewRef | null>) {
+	const userLocation = useCurrentLocation();
+	const [origin, setOrigin] = useState<RoutePoint>(CURRENT_LOCATION);
+	const [destination, setDestination] = useState<RoutePoint | null>(null);
+	const [active, setActive] = useState<ActiveField>("destination");
+	const [routeSummary, setRouteSummary] = useState<RouteSummary | null>(null);
+	const [isNavigating, setIsNavigating] = useState(false);
+
+	const search = useSearch(mapRef, userLocation);
+
+	const resolvedOrigin = origin.isCurrentLocation
+		? userLocation
+		: origin.coords;
+	const resolvedDestination = destination?.isCurrentLocation
+		? userLocation
+		: (destination?.coords ?? null);
+
+	const canRoute = !!resolvedOrigin && !!resolvedDestination;
+
+	const editField = useCallback(
+		(field: Exclude<ActiveField, null>) => {
+			setActive(field);
+			const point = field === "origin" ? origin : destination;
+			search.setQuery(point && !point.isCurrentLocation ? point.label : "");
+		},
+		[origin, destination, search],
+	);
+
+	const selectResult = useCallback(
+		async (feature: GeoJsonFeature) => {
+			const coords = await mapRef.current?.resolvePlace(
+				feature.properties.placeId,
+			);
+			if (!coords) return;
+
+			const point: RoutePoint = {
+				label: feature.properties.title,
+				coords,
+				isCurrentLocation: false,
+			};
+
+			if (active === "origin") {
+				setOrigin(point);
+				setActive(destination ? null : "destination");
+			} else {
+				setDestination(point);
+				setActive(origin.coords || origin.isCurrentLocation ? null : "origin");
+			}
+			search.clear();
+		},
+		[active, origin, destination, mapRef, search],
+	);
+
+	const setFieldToCurrent = useCallback(
+		(field: Exclude<ActiveField, null>) => {
+			if (field === "origin") setOrigin(CURRENT_LOCATION);
+			else setDestination(CURRENT_LOCATION);
+			setActive(null);
+			search.clear();
+		},
+		[search],
+	);
+
+	const clearField = useCallback(
+		(field: Exclude<ActiveField, null>) => {
+			if (field === "origin") setOrigin(CURRENT_LOCATION);
+			else setDestination(null);
+			setRouteSummary(null);
+			search.setQuery("");
+		},
+		[search],
+	);
+
+	const swap = useCallback(() => {
+		if (!destination && origin.isCurrentLocation) return;
+		const newOrigin: RoutePoint = destination ?? CURRENT_LOCATION;
+		const newDestination: RoutePoint = origin;
+		setOrigin(newOrigin);
+		setDestination(newDestination);
+		setActive(null);
+		setRouteSummary(null);
+	}, [origin, destination]);
+
+	const confirmRoute = useCallback(async () => {
+		if (!resolvedOrigin || !resolvedDestination) return false;
+		try {
+			const summary = await mapRef.current?.showRoute(
+				resolvedOrigin,
+				resolvedDestination,
+			);
+			if (summary) setRouteSummary(summary);
+			setActive(null);
+			return true;
+		} catch (e) {
+			console.error("Failed to show route:", e);
+			return false;
+		}
+	}, [resolvedOrigin, resolvedDestination, mapRef]);
+
+	const startNavigation = useCallback(async () => {
+		if (!resolvedOrigin || !resolvedDestination) return false;
+		try {
+			await mapRef.current?.startGuidance(resolvedOrigin, resolvedDestination);
+			setIsNavigating(true);
+			setActive(null);
+			return true;
+		} catch (e) {
+			console.error("Failed to start guidance:", e);
+			return false;
+		}
+	}, [resolvedOrigin, resolvedDestination, mapRef]);
+
+	const stopNavigation = useCallback(async () => {
+		try {
+			await mapRef.current?.stopGuidance();
+		} finally {
+			setIsNavigating(false);
+		}
+	}, [mapRef]);
+
+	const clearRoute = useCallback(() => {
+		mapRef.current?.clearRoute();
+		setRouteSummary(null);
+		setDestination(null);
+		setActive("destination");
+	}, [mapRef]);
+
+	return {
+		query: search.query,
+		setQuery: search.setQuery,
+		results: search.results,
+		isLoading: search.isLoading,
+		hasSearched: search.hasSearched,
+		clear: search.clear,
+		origin,
+		destination,
+		active,
+		resolvedOrigin,
+		resolvedDestination,
+		canRoute,
+		routeSummary,
+		isNavigating,
+		userLocation,
+		editField,
+		selectResult,
+		setFieldToCurrent,
+		clearField,
+		swap,
+		confirmRoute,
+		startNavigation,
+		stopNavigation,
+		clearRoute,
+	};
+}

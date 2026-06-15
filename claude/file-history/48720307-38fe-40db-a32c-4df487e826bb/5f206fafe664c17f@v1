@@ -1,0 +1,355 @@
+import 'dart:async';
+
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/mapview.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/providers/navigation_provider.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/map/controllers/map_controller.dart';
+
+class CheckpointActionSheet extends ConsumerWidget {
+  final Checkpoint checkpoint;
+
+  const CheckpointActionSheet({required this.checkpoint, super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final latestStatus =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.status
+            : null;
+    // ignore: avoid_dynamic_calls — metadata is not typed in DTO
+    final cameraUrl = (checkpoint as dynamic).metadata?.cameraUrl as String?;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: ThemeColors.bgRaised,
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(ThemeRadius.r2xl),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp2,
+        ThemeSpacing.sp4,
+        ThemeSpacing.sp10,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: ThemeSpacing.sp3),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ThemeColors.stone200,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: ThemeSpacing.sp2),
+          Row(
+            children: [
+              _CurrentStatusIndicator(status: latestStatus),
+              const SizedBox(width: ThemeSpacing.sp4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      checkpoint.name,
+                      style: theme.textTheme.displayMedium?.copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: ThemeColors.textPrimary,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${checkpoint.latitude.toStringAsFixed(5)}, ${checkpoint.longitude.toStringAsFixed(5)} • Reported ${DateFormat('HH:mm').format(checkpoint.createdAt.toLocal())}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeColors.textTertiary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: ThemeSpacing.sp5),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                ref.read(bottomNavIndexProvider.notifier).state = 0;
+
+                final mapController = ref.read(mapControllerProvider);
+                if (mapController != null) {
+                  mapController.camera.lookAtPointWithMeasure(
+                    GeoCoordinates(
+                      checkpoint.latitude.toDouble(),
+                      checkpoint.longitude.toDouble(),
+                    ),
+                    MapMeasure(MapMeasureKind.distanceInMeters, 1000),
+                  );
+                }
+                Navigator.pop(context);
+              },
+              icon: const Icon(CupertinoIcons.map_pin_ellipse, size: 18),
+              label: const Text('View on map'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ThemeColors.textPrimary,
+                side: const BorderSide(color: ThemeColors.borderStrong),
+                padding: const EdgeInsets.symmetric(vertical: ThemeSpacing.sp4),
+                shape: RoundedRectangleBorder(borderRadius: ThemeRadius.brMd),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+          if (cameraUrl != null &&
+              cameraUrl.isNotEmpty &&
+              !cameraUrl.contains('https://example')) ...[
+            const SizedBox(height: ThemeSpacing.sp5),
+            ClipRRect(
+              borderRadius: ThemeRadius.brLg,
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  children: [
+                    Image.network(
+                      cameraUrl,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder:
+                          (context, error, stackTrace) => const ColoredBox(
+                            color: ThemeColors.stone100,
+                            child: Center(
+                              child: Icon(
+                                CupertinoIcons.camera,
+                                color: ThemeColors.stone300,
+                              ),
+                            ),
+                          ),
+                    ),
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              CupertinoIcons.circle_fill,
+                              color: Colors.red,
+                              size: 8,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'LIVE',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: ThemeSpacing.sp6),
+          Text(
+            'Update status',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              color: ThemeColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: ThemeSpacing.sp3),
+          _StatusButton(
+            label: 'Active',
+            description: 'The checkpoint is currently here',
+            color: ThemeColors.danger,
+            icon: CupertinoIcons.dot_radiowaves_right,
+            onTap: () => _submit(ref, context, ContributionStatusEnum.ACTIVE),
+          ),
+          const SizedBox(height: ThemeSpacing.sp2),
+          _StatusButton(
+            label: 'Police Activity',
+            description: 'Report high presence in this area',
+            color: const Color(0xFFFF9500),
+            icon: CupertinoIcons.exclamationmark_triangle_fill,
+            onTap:
+                () =>
+                    _submit(ref, context, ContributionStatusEnum.POLICE_ALERT),
+          ),
+          const SizedBox(height: ThemeSpacing.sp2),
+          _StatusButton(
+            label: 'Clear',
+            description: 'Nothing found at this location',
+            color: const Color(0xFF34C759),
+            icon: CupertinoIcons.checkmark_shield_fill,
+            onTap: () => _submit(ref, context, ContributionStatusEnum.INACTIVE),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _submit(
+    WidgetRef ref,
+    BuildContext context,
+    ContributionStatusEnum status,
+  ) {
+    unawaited(ref
+        .read(checkpointNotifierProvider.notifier)
+        .contribute(checkpoint.id, status));
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Status updated to ${status.name.toLowerCase()}'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: ThemeColors.stone900,
+        shape: RoundedRectangleBorder(borderRadius: ThemeRadius.brMd),
+        margin: const EdgeInsets.all(ThemeSpacing.sp4),
+      ),
+    );
+  }
+}
+
+class _CurrentStatusIndicator extends StatelessWidget {
+  final ContributionStatusEnum? status;
+
+  const _CurrentStatusIndicator({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, IconData icon) = switch (status) {
+      ContributionStatusEnum.ACTIVE => (
+        ThemeColors.danger,
+        CupertinoIcons.dot_radiowaves_right,
+      ),
+      ContributionStatusEnum.INACTIVE => (
+        const Color(0xFF34C759),
+        CupertinoIcons.checkmark_shield_fill,
+      ),
+      ContributionStatusEnum.POLICE_ALERT => (
+        const Color(0xFFFF9500),
+        CupertinoIcons.exclamationmark_triangle_fill,
+      ),
+      _ => (ThemeColors.stone300, CupertinoIcons.question_circle_fill),
+    };
+
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        shape: BoxShape.circle,
+      ),
+      child: Center(child: Icon(icon, color: color, size: 24)),
+    );
+  }
+}
+
+class _StatusButton extends StatelessWidget {
+  final String label;
+  final String description;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _StatusButton({
+    required this.label,
+    required this.description,
+    required this.color,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: ThemeRadius.brLg,
+        child: Container(
+          padding: const EdgeInsets.all(ThemeSpacing.sp4),
+          decoration: BoxDecoration(
+            borderRadius: ThemeRadius.brLg,
+            border: Border.all(color: ThemeColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: ThemeSpacing.sp4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: ThemeColors.textPrimary,
+                        fontSize: 15,
+                      ),
+                    ),
+                    Text(
+                      description,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeColors.textSecondary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                CupertinoIcons.chevron_right,
+                size: 14,
+                color: ThemeColors.stone300,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

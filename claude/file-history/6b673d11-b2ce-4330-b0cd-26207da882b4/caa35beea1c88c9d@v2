@@ -1,0 +1,37 @@
+export const overview = {
+  greeting_morning: "Good morning",
+  greeting_afternoon: "Good afternoon",
+  greeting_evening: "Good evening",
+
+  quick_actions: "Quick actions",
+
+  teacher_lessons_total: "Lessons Uploaded",
+  teacher_lessons_analysed: "Analysed",
+  teacher_latest_score: "Latest Score",
+  teacher_active_goals: "Active Goals",
+  teacher_current_goal: "Current Goal",
+  teacher_no_goal_title: "No active goals",
+  teacher_no_goal_body: "Set a professional development goal from your action plans.",
+  teacher_set_goal_cta: "Set a goal",
+  teacher_no_lessons_title: "No lessons uploaded yet",
+  teacher_no_lessons_body:
+    "Upload your first lesson to start tracking your teaching progress.",
+  teacher_upload_first: "Upload your first lesson",
+  teacher_upload: "Upload Lesson",
+  teacher_analytics: "View Analytics",
+  teacher_goals: "My Goals",
+  teacher_view_all_goals: "View all goals",
+
+  principal_members: "Staff Members",
+  principal_pending: "Pending Invites",
+  principal_active_plans: "Active Plans",
+  principal_manage_staff: "Manage Staff",
+  principal_invite_teacher: "Invite Teacher",
+  principal_action_plans: "Action Plans",
+
+  org_schools: "Schools",
+  org_members: "Total Members",
+  org_pending: "Pending Invites",
+  org_no_principal: "Without Principal",
+  org_view_all: "View All Schools",
+} as const;

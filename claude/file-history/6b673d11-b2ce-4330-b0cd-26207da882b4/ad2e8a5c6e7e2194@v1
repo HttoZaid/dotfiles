@@ -1,0 +1,148 @@
+const dictionaries = {
+  en: async () => {
+    const [
+      auth,
+      common,
+      sidebar,
+      upload,
+      lessonsDetail,
+      lessonsListDictionary,
+      schoolStructure,
+      schoolProfile,
+      schoolStaff,
+      rubric,
+      acceptInvite,
+      notifications,
+      organization,
+      profile,
+      sage,
+      actionPlans,
+      analytics,
+    ] = await Promise.all([
+      import("./locales/en/auth").then((m) => m.auth),
+      import("./locales/en/common").then((m) => m.common),
+      import("./locales/en/dashboard/sidebar").then((m) => m.sidebar),
+
+      import("./locales/en/dashboard/lessons/upload").then(
+        (m) => m.lessons.upload,
+      ),
+      import("./locales/en/dashboard/lessons/detail").then(
+        (m) => m.lessonsDetail.detail,
+      ),
+      import("./locales/en/dashboard/lessons/list").then(
+        (m) => m.lessonsListDictionary,
+      ),
+
+      import("./locales/en/dashboard/school/structure").then(
+        (m) => m.schoolStructure,
+      ),
+      import("./locales/en/dashboard/school/profile").then(
+        (m) => m.schoolProfile,
+      ),
+      import("./locales/en/dashboard/school/staff").then((m) => m.staff),
+      import("./locales/en/dashboard/rubric").then((m) => m.rubric),
+      import("./locales/en/public/accept-invite").then((m) => m.acceptInvite),
+      import("./locales/en/dashboard/notifications").then(
+        (m) => m.notifications,
+      ),
+      import("./locales/en/dashboard/organization").then((m) => m.organization),
+      import("./locales/en/dashboard/profile").then((m) => m.profile),
+      import("./locales/en/dashboard/sage").then((m) => m.sage),
+      import("./locales/en/dashboard/action-plans").then((m) => m.actionPlans),
+      import("./locales/en/dashboard/analytics").then((m) => m.analytics),
+    ]);
+
+    return {
+      auth,
+      common,
+      sidebar,
+      lessons: {
+        upload,
+        detail: lessonsDetail,
+        list: lessonsListDictionary.list,
+      },
+      dashboard: {
+        school: { ...schoolStructure, schoolProfile, schoolStaff },
+        rubric,
+        notifications,
+        organization,
+        profile,
+        sage,
+        actionPlans,
+        analytics,
+      },
+      public: { acceptInvite },
+    };
+  },
+  ar: async () => {
+    const [auth, common, notifications, organization, sage, actionPlans] = await Promise.all(
+      [
+        import("./locales/ar/auth").then((m) => m.auth),
+        import("./locales/ar/common").then((m) => m.common),
+        import("./locales/ar/dashboard/notifications").then(
+          (m) => m.notifications,
+        ),
+        import("./locales/ar/dashboard/organization").then(
+          (m) => m.organization,
+        ),
+        import("./locales/ar/dashboard/sage")
+          .then((m) => m.sage)
+          .catch(() =>
+            import("./locales/en/dashboard/sage").then((m) => m.sage),
+          ),
+        import("./locales/ar/dashboard/action-plans")
+          .then((m) => m.actionPlans)
+          .catch(() =>
+            import("./locales/en/dashboard/action-plans").then((m) => m.actionPlans),
+          ),
+      ],
+    );
+
+    return {
+      auth,
+      common,
+      sidebar: (await import("./locales/en/dashboard/sidebar")).sidebar,
+      lessons: {
+        upload: (await import("./locales/en/dashboard/lessons/upload")).lessons
+          .upload,
+        detail: (await import("./locales/en/dashboard/lessons/detail"))
+          .lessonsDetail.detail,
+        list: (await import("./locales/en/dashboard/lessons/list"))
+          .lessonsListDictionary.list,
+      },
+      dashboard: {
+        school: {
+          structure: (await import("./locales/en/dashboard/school/structure"))
+            .schoolStructure,
+          schoolProfile: (await import("./locales/en/dashboard/school/profile"))
+            .schoolProfile,
+          schoolStaff: (await import("./locales/en/dashboard/school/staff"))
+            .staff,
+        },
+        rubric: (await import("./locales/en/dashboard/rubric")).rubric,
+        notifications,
+        organization,
+        profile: (await import("./locales/en/dashboard/profile")).profile,
+        sage,
+        actionPlans,
+        analytics: (await import("./locales/en/dashboard/analytics")).analytics,
+      },
+    };
+  },
+};
+
+type Widen<T> = T extends string
+  ? string
+  : T extends object
+    ? { [K in keyof T]: Widen<T[K]> }
+    : T;
+
+export type Dictionary = Widen<
+  Awaited<ReturnType<(typeof dictionaries)["en"]>>
+>;
+
+export const getDictionary = async (
+  locale: "en" | "ar",
+): Promise<Dictionary> => {
+  return (await dictionaries[locale]()) as Dictionary;
+};

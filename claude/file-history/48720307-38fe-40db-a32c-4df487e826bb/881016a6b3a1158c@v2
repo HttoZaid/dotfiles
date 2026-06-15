@@ -1,0 +1,87 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+
+class CheckpointSearchHeader extends ConsumerStatefulWidget {
+  const CheckpointSearchHeader({super.key});
+
+  @override
+  ConsumerState<CheckpointSearchHeader> createState() =>
+      _CheckpointSearchHeaderState();
+}
+
+class _CheckpointSearchHeaderState
+    extends ConsumerState<CheckpointSearchHeader> {
+  final _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _controller,
+      onChanged: (v) => ref.read(checkpointSearchProvider.notifier).update(v),
+      style: const TextStyle(
+        fontFamily: ThemeFonts.ui,
+        fontSize: 15,
+        fontWeight: FontWeight.w400,
+        color: ThemeColors.textPrimary,
+      ),
+      cursorColor: ThemeColors.accent,
+      decoration: InputDecoration(
+        hintText: 'Search checkpoints...',
+        hintStyle: const TextStyle(
+          fontFamily: ThemeFonts.ui,
+          fontSize: 15,
+          fontWeight: FontWeight.w400,
+          color: ThemeColors.textTertiary,
+        ),
+        prefixIcon: const Icon(
+          Icons.search_rounded,
+          size: 20,
+          color: ThemeColors.textTertiary,
+        ),
+        suffixIcon:
+            _controller.text.isEmpty
+                ? null
+                : GestureDetector(
+                  onTap: () {
+                    _controller.clear();
+                    ref.read(checkpointSearchProvider.notifier).update('');
+                  },
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: ThemeColors.textTertiary,
+                  ),
+                ),
+        filled: true,
+        fillColor: ThemeColors.bgSubtle,
+        border: OutlineInputBorder(
+          borderRadius: ThemeRadius.brFull,
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: ThemeRadius.brFull,
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: ThemeRadius.brFull,
+          borderSide: const BorderSide(color: ThemeColors.accent, width: 1.5),
+        ),
+        contentPadding: EdgeInsets.zero,
+      ),
+    );
+  }
+}

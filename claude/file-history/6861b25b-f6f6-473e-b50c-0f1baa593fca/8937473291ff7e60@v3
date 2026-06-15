@@ -1,0 +1,52 @@
+import { formatDistance, formatEta } from "@/features/navigation/lib/format-route";
+import { useRouteState } from "@/features/navigation/route-context";
+import { X } from "lucide-react-native";
+import { Pressable, Text, View } from "react-native";
+import Animated, { FadeIn } from "react-native-reanimated";
+
+type NavigatingCardProps = {
+	destination: string;
+	onEnd: () => void;
+};
+
+/* Uber driver-card style — destination prominent, end button understated */
+export function NavigatingCard({ destination, onEnd }: NavigatingCardProps) {
+	const { etaSeconds, remainingMeters } = useRouteState();
+
+	const meta = [
+		remainingMeters != null ? formatDistance(remainingMeters) : null,
+		etaSeconds != null ? `Arrive ${formatEta(etaSeconds)}` : null,
+	]
+		.filter(Boolean)
+		.join("  ·  ");
+
+	return (
+		<Animated.View entering={FadeIn.duration(220)} className="gap-3">
+			{/* Destination card */}
+			<View className="rounded-2xl border border-border bg-card px-5 py-4 gap-1">
+				<Text className="text-[11px] font-bold uppercase tracking-[1.2px] text-muted-foreground">
+					Navigating to
+				</Text>
+				<Text
+					className="text-[21px] font-bold tracking-tight text-foreground"
+					numberOfLines={1}
+				>
+					{destination}
+				</Text>
+				{meta ? (
+					<Text className="text-[14px] text-muted-foreground">{meta}</Text>
+				) : null}
+			</View>
+
+			{/* End — outlined, not a big red slab */}
+			<Pressable onPress={onEnd} className="active:opacity-70">
+				<View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/8 py-3.5">
+					<X size={16} className="text-destructive" strokeWidth={2.5} />
+					<Text className="text-[15px] font-semibold text-destructive">
+						End navigation
+					</Text>
+				</View>
+			</Pressable>
+		</Animated.View>
+	);
+}

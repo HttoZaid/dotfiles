@@ -1,0 +1,212 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:ukcheckpoints_api/ukcheckpoints_api.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/widgets/checkpoint_action_sheet_widget.dart';
+
+class CheckpointCard extends StatelessWidget {
+  final Checkpoint checkpoint;
+  final double? distanceMeters;
+
+  const CheckpointCard({
+    required this.checkpoint,
+    this.distanceMeters,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.status
+            : null;
+    final lastUpdate =
+        checkpoint.contributions.isNotEmpty
+            ? checkpoint.contributions.first.createdAt
+            : checkpoint.createdAt;
+
+    final statusColor = _statusColor(status);
+
+    return RepaintBoundary(
+      child: Material(
+        color: ThemeColors.bgRaised,
+        borderRadius: ThemeRadius.brMd,
+        child: InkWell(
+          borderRadius: ThemeRadius.brMd,
+          onTap: () {
+            unawaited(
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (ctx) =>
+                    CheckpointActionSheet(checkpoint: checkpoint),
+              ),
+            );
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: ThemeRadius.brMd,
+              border: Border.all(color: ThemeColors.border),
+            ),
+            child: ClipRRect(
+              borderRadius: ThemeRadius.brMd,
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Status strip
+                    Container(width: 3, color: statusColor),
+                    // Content
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: ThemeSpacing.sp3,
+                          vertical: ThemeSpacing.sp3,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    checkpoint.name,
+                                    style: const TextStyle(
+                                      fontFamily: ThemeFonts.ui,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: -0.2,
+                                      color: ThemeColors.textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  _MetaRow(
+                                    status: status,
+                                    distanceMeters: distanceMeters,
+                                    lastUpdate: lastUpdate,
+                                    statusColor: statusColor,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: ThemeSpacing.sp2),
+                            const Icon(
+                              Icons.chevron_right_rounded,
+                              size: 16,
+                              color: ThemeColors.stone300,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Color _statusColor(ContributionStatusEnum? status) =>
+      switch (status) {
+        ContributionStatusEnum.ACTIVE => ThemeColors.danger,
+        ContributionStatusEnum.INACTIVE => const Color(0xFF1F7A4D),
+        ContributionStatusEnum.POLICE_ALERT => const Color(0xFFB45309),
+        _ => ThemeColors.stone300,
+      };
+}
+
+class _MetaRow extends StatelessWidget {
+  final ContributionStatusEnum? status;
+  final double? distanceMeters;
+  final DateTime lastUpdate;
+  final Color statusColor;
+
+  const _MetaRow({
+    required this.status,
+    required this.distanceMeters,
+    required this.lastUpdate,
+    required this.statusColor,
+  });
+
+  String get _statusLabel => switch (status) {
+    ContributionStatusEnum.ACTIVE => 'Active',
+    ContributionStatusEnum.INACTIVE => 'Clear',
+    ContributionStatusEnum.POLICE_ALERT => 'Police',
+    _ => 'Unknown',
+  };
+
+  String _distance(double m) {
+    final mi = m / 1609.344;
+    if (mi < 0.1) return '${m.round()} m';
+    if (mi < 10) return '${mi.toStringAsFixed(1)} mi';
+    return '${mi.round()} mi';
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return DateFormat('HH:mm').format(dt.toLocal());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const sep = TextSpan(
+      text: '  ·  ',
+      style: TextStyle(
+        fontFamily: ThemeFonts.ui,
+        fontSize: 12,
+        color: ThemeColors.stone300,
+      ),
+    );
+
+    return RichText(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: _statusLabel,
+            style: TextStyle(
+              fontFamily: ThemeFonts.ui,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: statusColor,
+            ),
+          ),
+          if (distanceMeters != null) ...[
+            sep,
+            TextSpan(
+              text: _distance(distanceMeters!),
+              style: const TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 12,
+                fontWeight: FontWeight.w400,
+                color: ThemeColors.textTertiary,
+              ),
+            ),
+          ],
+          sep,
+          TextSpan(
+            text: _timeAgo(lastUpdate),
+            style: const TextStyle(
+              fontFamily: ThemeFonts.ui,
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+              color: ThemeColors.textTertiary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

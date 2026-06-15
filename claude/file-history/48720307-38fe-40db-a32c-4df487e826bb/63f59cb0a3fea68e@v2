@@ -1,0 +1,92 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+
+class CheckpointErrorView extends ConsumerWidget {
+  final String message;
+
+  const CheckpointErrorView({required this.message, super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SliverFillRemaining(
+      hasScrollBody: false,
+      child: Padding(
+        padding: const EdgeInsets.all(ThemeSpacing.sp8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 64,
+              height: 64,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: ThemeColors.bgSubtle,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.cloud_off_rounded,
+                  size: 28,
+                  color: ThemeColors.stone400,
+                ),
+              ),
+            ),
+            const SizedBox(height: ThemeSpacing.sp5),
+            const Text(
+              'Sync interrupted',
+              style: TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.4,
+                color: ThemeColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: ThemeSpacing.sp2),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: ThemeFonts.ui,
+                fontSize: 14,
+                color: ThemeColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: ThemeSpacing.sp6),
+            SizedBox(
+              width: 160,
+              child: OutlinedButton(
+                onPressed: () {
+                  unawaited(
+                    ref
+                        .read(checkpointNotifierProvider.notifier)
+                        .refresh(),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ThemeColors.textPrimary,
+                  side: const BorderSide(color: ThemeColors.border),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: ThemeSpacing.sp3,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: ThemeRadius.brMd,
+                  ),
+                  textStyle: const TextStyle(
+                    fontFamily: ThemeFonts.ui,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                child: const Text('Try again'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,130 @@
+import 'dart:async';
+
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/search.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+
+import '../utils/strings.dart';
+import 'nav_search_state.dart';
+
+part 'nav_search_notifier.g.dart';
+
+@Riverpod(keepAlive: true)
+class NavSearchNotifier extends _$NavSearchNotifier {
+  SearchEngine? _engine;
+  Timer? _debounce;
+
+  // Incremented on every new search. Stale callbacks compare against this and
+  // drop their result if a newer search has already fired.
+  int _gen = 0;
+
+  @override
+  NavSearchState build() {
+    _engine = SearchEngine();
+    ref.onDispose(() {
+      _debounce?.cancel();
+    });
+    return NavSearchState();
+  }
+
+  void setActiveField(SearchField field) {
+    if (state.activeField == field) return;
+    state = state.withClearedSuggestions().copyWith(activeField: field);
+  }
+
+  /// Triggers a debounced autosuggest for [query] biased around [center].
+  /// Pass null for [center] to use a London default (online search only).
+  void search(String query, GeoCoordinates? center) {
+    _debounce?.cancel();
+
+    if (query.trim().isEmpty) {
+      _gen++;
+      state = state.withClearedSuggestions();
+      return;
+    }
+
+    state = state.copyWith(isLoading: true, error: null, suggestions: []);
+    final gen = ++_gen;
+    _debounce = Timer(
+      const Duration(milliseconds: 250),
+      () => _doSearch(query, center, gen),
+    );
+  }
+
+  void _doSearch(String query, GeoCoordinates? center, int gen) {
+    final engine = _engine;
+    if (engine == null) return;
+
+    final area = TextQueryArea.withCenter(
+      center ?? GeoCoordinates(51.5074, -0.1278), // London fallback
+    );
+    final textQuery = TextQuery.withArea(query, area);
+    final opts = SearchOptions()
+      ..languageCode = LanguageCode.enGb
+      ..maxItems = 7;
+
+    engine.suggestByText(textQuery, opts, (SearchError? err, List<Suggestion>? results) {
+      if (gen != _gen) return; // superseded by a newer search
+      if (err != null) {
+        state = state.copyWith(
+          isLoading: false,
+          error: NavStrings.searchError,
+          suggestions: [],
+        );
+        return;
+      }
+      state = state.copyWith(
+        isLoading: false,
+        error: null,
+        suggestions: results ?? [],
+      );
+    });
+  }
+
+  void selectOrigin(Suggestion s) {
+    _cancel();
+    state = state.withOrigin(s);
+  }
+
+  void selectDest(Suggestion s) {
+    _cancel();
+    state = state.withDest(s);
+  }
+
+  void clearOrigin() {
+    _cancel();
+    state = state.withOrigin(null);
+  }
+
+  void clearDest() {
+    _cancel();
+    state = state.withDest(null);
+  }
+
+  void swap() {
+    _cancel();
+    state = state.swapped();
+  }
+
+  void lockForRouting() {
+    if (!state.isRouting) state = state.copyWith(isRouting: true);
+  }
+
+  void unlockRouting() {
+    if (state.isRouting) state = state.copyWith(isRouting: false);
+  }
+
+  void setError(String? message) {
+    if (state.error != message) state = state.copyWith(error: message);
+  }
+
+  void reset() {
+    _cancel();
+    state = NavSearchState();
+  }
+
+  void _cancel() {
+    _debounce?.cancel();
+    _gen++;
+  }
+}

@@ -1,0 +1,31 @@
+import { Sheet, SheetExpanded, SheetPeek } from "@/components/ui/sheet";
+import { SheetSearch } from "@/features/navigation/components/SheetSearch";
+import { SheetSearchDecoy } from "@/features/navigation/components/SheetSearchDecoy";
+import type { HereMapsViewRef } from "expo-here-maps";
+import { HereMapsView } from "expo-here-maps";
+import { useRef } from "react";
+import { StyleSheet, View } from "react-native";
+
+export default function Home() {
+	const mapRef = useRef<HereMapsViewRef>(null);
+	return (
+		<View style={{ flex: 1 }}>
+			<HereMapsView
+				ref={mapRef}
+				style={StyleSheet.absoluteFill}
+				bearing={0}
+				tilt={0}
+			/>
+
+			<Sheet snapPoints={["peek", "half", "full"]}>
+				<SheetPeek>
+					<SheetSearchDecoy />
+				</SheetPeek>
+
+				<SheetExpanded>
+					<SheetSearch mapRef={mapRef} />
+				</SheetExpanded>
+			</Sheet>
+		</View>
+	);
+}

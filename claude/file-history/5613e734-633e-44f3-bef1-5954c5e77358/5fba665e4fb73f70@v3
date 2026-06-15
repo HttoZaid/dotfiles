@@ -1,0 +1,201 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/navigation_phase.dart';
+import 'package:ukcheckpoints_app/features/navigation/models/sheet_state.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/nav_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/sheet_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/sheets/full_search_content.dart';
+import 'package:ukcheckpoints_app/features/navigation/sheets/guidance_full_content.dart';
+import 'package:ukcheckpoints_app/features/navigation/sheets/peek_content.dart';
+import 'package:ukcheckpoints_app/features/navigation/sheets/trip_overview_content.dart';
+
+const double kMapSheetMinExtent  = 0.15;
+const double kMapSheetMidExtent  = 0.50;
+const double kMapSheetMaxExtent  = 0.92;
+
+// Tolerance for snapped-position detection from the controller listener.
+const double _snapTol = 0.02;
+
+class MapBottomSheet extends ConsumerStatefulWidget {
+  const MapBottomSheet({super.key});
+
+  @override
+  ConsumerState<MapBottomSheet> createState() => _MapBottomSheetState();
+}
+
+class _MapBottomSheetState extends ConsumerState<MapBottomSheet> {
+  final _controller = DraggableScrollableController();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_onControllerChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  // ── Drag → provider sync ──────────────────────────────────────────────────
+  // When the user manually drags the sheet to a snap point, mirror that into
+  // the provider so the rendered content stays correct.
+  void _onControllerChanged() {
+    if (!_controller.isAttached) return;
+    final s = _controller.size;
+    final notifier = ref.read(sheetStateNotifierProvider.notifier);
+    if ((s - kMapSheetMinExtent).abs() < _snapTol) {
+      notifier.peek();
+    } else if ((s - kMapSheetMaxExtent).abs() < _snapTol) {
+      notifier.expand();
+    } else if ((s - kMapSheetMidExtent).abs() < _snapTol) {
+      // Mid is excluded from snapSizes when there is no active route, so this
+      // branch only fires during TripOverview / ActiveDrive.
+      final phase = ref.read(navStateNotifierProvider);
+      if (phase is TripOverview || phase is ActiveDrive) {
+        notifier.showTripOverview();
+      }
+    }
+  }
+
+  // ── Provider → animation ──────────────────────────────────────────────────
+  Future<void> _animateTo(double extent) async {
+    if (!_controller.isAttached) return;
+    if ((_controller.size - extent).abs() < _snapTol) return;
+    await _controller.animateTo(
+      extent,
+      duration: ThemeMotion.medium,
+      curve: ThemeMotion.smooth,
+    );
+  }
+
+  void _onExpand() {
+    ref.read(sheetStateNotifierProvider.notifier).expand();
+    unawaited(_animateTo(kMapSheetMaxExtent));
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    // Mid snap is only valid when a route is active; exclude it otherwise so
+    // the sheet can only snap between peek and full.
+    final phase = ref.watch(navStateNotifierProvider);
+    final allowMid = phase is TripOverview || phase is ActiveDrive;
+
+    // Drive sheet animation whenever the provider mode changes.
+    ref.listen<SheetState>(sheetStateNotifierProvider, (prev, next) {
+      if (prev?.mode == next.mode) return;
+      switch (next.mode) {
+        case SheetMode.peek:
+          unawaited(_animateTo(kMapSheetMinExtent));
+        case SheetMode.fullSearch:
+          unawaited(_animateTo(kMapSheetMaxExtent));
+        case SheetMode.tripOverview:
+          unawaited(_animateTo(kMapSheetMidExtent));
+      }
+    });
+
+    return DraggableScrollableSheet(
+      controller: _controller,
+      initialChildSize: kMapSheetMinExtent,
+      minChildSize:     kMapSheetMinExtent,
+      maxChildSize:     kMapSheetMaxExtent,
+      snap:      true,
+      snapSizes: [
+        kMapSheetMinExtent,
+        if (allowMid) kMapSheetMidExtent,
+        kMapSheetMaxExtent,
+      ],
+      builder: (context, scrollController) => _SheetSurface(
+        scrollController: scrollController,
+        onExpand: _onExpand,
+      ),
+    );
+  }
+}
+
+// ── Sheet surface ─────────────────────────────────────────────────────────
+
+class _SheetSurface extends ConsumerWidget {
+  final ScrollController scrollController;
+  final VoidCallback onExpand;
+
+  const _SheetSurface({
+    required this.scrollController,
+    required this.onExpand,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(sheetStateNotifierProvider).mode;
+    final phase = ref.watch(navStateNotifierProvider);
+    final isGuidance = phase is TripOverview || phase is ActiveDrive;
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: ThemeColors.surface,
+        borderRadius: ThemeRadius.brSheet,
+        boxShadow: ThemeShadows.modal,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _DragHandle(),
+          Expanded(
+            child: CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: switch (mode) {
+                    SheetMode.peek =>
+                      NavPeekContent(onTap: onExpand),
+                    SheetMode.fullSearch when isGuidance =>
+                      const NavGuidanceFullContent(),
+                    SheetMode.fullSearch =>
+                      const NavFullSearchContent(),
+                    SheetMode.tripOverview when phase is ActiveDrive =>
+                      const NavGuidanceFullContent(),
+                    SheetMode.tripOverview =>
+                      const NavTripOverviewContent(),
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Drag handle ───────────────────────────────────────────────────────────
+
+class _DragHandle extends StatelessWidget {
+  const _DragHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      height: 28,
+      child: Center(
+        child: SizedBox(
+          width: 36,
+          height: 4,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: ThemeColors.borderStrong,
+              borderRadius: BorderRadius.all(Radius.circular(2)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

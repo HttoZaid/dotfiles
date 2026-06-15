@@ -1,0 +1,85 @@
+"use client";
+
+import { StatCard } from "@/app/(dashboard)/organization/_components/stat-card";
+import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n/client-provider";
+import {
+  ArrowRightIcon,
+  ChalkboardTeacherIcon,
+  PaperPlaneTiltIcon,
+  TargetIcon,
+} from "@phosphor-icons/react";
+import Link from "next/link";
+import type { PrincipalOverviewData } from "../_queries/get-overview";
+
+type Props = {
+  data: PrincipalOverviewData;
+  displayName: string;
+};
+
+function getGreetingKey(): "greeting_morning" | "greeting_afternoon" | "greeting_evening" {
+  const h = new Date().getHours();
+  if (h < 12) return "greeting_morning";
+  if (h < 17) return "greeting_afternoon";
+  return "greeting_evening";
+}
+
+export function PrincipalOverview({ data, displayName }: Props) {
+  const t = useI18n();
+  const copy = t.dashboard.overview;
+
+  const greeting = copy[getGreetingKey()];
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+          {data.schoolName}
+          {data.schoolCountry ? ` · ${data.schoolCountry}` : ""}
+        </p>
+        <p className="mt-0.5 text-sm text-muted-foreground">{greeting}</p>
+        <h1 className="text-2xl font-medium tracking-tight">{displayName}</h1>
+      </header>
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard label={copy.principal_members} value={data.memberCount} />
+        <StatCard
+          label={copy.principal_pending}
+          value={data.pendingCount}
+          tone={data.pendingCount > 0 ? "warning" : "default"}
+        />
+        <StatCard label={copy.principal_active_plans} value={data.activeSchoolPlans} />
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {copy.quick_actions}
+        </h2>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/school/staff">
+              <ChalkboardTeacherIcon size={13} weight="bold" />
+              {copy.principal_manage_staff}
+              <ArrowRightIcon size={11} weight="bold" />
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/action-plans">
+              <TargetIcon size={13} weight="bold" />
+              {copy.principal_action_plans}
+              <ArrowRightIcon size={11} weight="bold" />
+            </Link>
+          </Button>
+          {data.pendingCount === 0 && (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/school/staff?invite=teacher">
+                <PaperPlaneTiltIcon size={13} weight="bold" />
+                {copy.principal_invite_teacher}
+              </Link>
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

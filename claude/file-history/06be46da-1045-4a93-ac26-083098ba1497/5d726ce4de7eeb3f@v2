@@ -1,0 +1,508 @@
+import 'dart:math' show pi;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:here_sdk/core.dart';
+import 'package:here_sdk/search.dart';
+import 'package:ukcheckpoints_app/core/theme/theme.dart';
+import 'package:ukcheckpoints_app/features/checkpoints/providers/checkpoint_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/providers/sheet_state_provider.dart';
+import 'package:ukcheckpoints_app/features/navigation/search/nav_search_notifier.dart';
+import 'package:ukcheckpoints_app/features/navigation/search/nav_search_state.dart';
+import 'package:ukcheckpoints_app/features/navigation/search/suggestion_row.dart';
+import 'package:ukcheckpoints_app/features/navigation/utils/strings.dart';
+
+class NavFullSearchContent extends ConsumerStatefulWidget {
+  const NavFullSearchContent({super.key});
+
+  @override
+  ConsumerState<NavFullSearchContent> createState() =>
+      _NavFullSearchContentState();
+}
+
+class _NavFullSearchContentState extends ConsumerState<NavFullSearchContent>
+    with SingleTickerProviderStateMixin {
+  late final TextEditingController _originCtrl;
+  late final TextEditingController _destCtrl;
+  late final FocusNode _originFocus;
+  late final FocusNode _destFocus;
+  late final AnimationController _swapAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    final search = ref.read(navSearchNotifierProvider);
+    _originCtrl = TextEditingController(text: search.selectedOrigin?.title ?? '');
+    _destCtrl   = TextEditingController(text: search.selectedDest?.title ?? '');
+
+    _originFocus = FocusNode()..addListener(_onOriginFocusChanged);
+    _destFocus   = FocusNode()..addListener(_onDestFocusChanged);
+
+    _swapAnim = AnimationController(
+      vsync: this,
+      duration: ThemeMotion.normal,
+    );
+  }
+
+  @override
+  void dispose() {
+    _originCtrl.dispose();
+    _destCtrl.dispose();
+    _originFocus.dispose();
+    _destFocus.dispose();
+    _swapAnim.dispose();
+    super.dispose();
+  }
+
+  // ── Focus listeners ────────────────────────────────────────────
+
+  void _onOriginFocusChanged() {
+    if (_originFocus.hasFocus) {
+      ref.read(navSearchNotifierProvider.notifier).setActiveField(SearchField.origin);
+    }
+  }
+
+  void _onDestFocusChanged() {
+    if (_destFocus.hasFocus) {
+      ref.read(navSearchNotifierProvider.notifier).setActiveField(SearchField.dest);
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────
+
+  GeoCoordinates? _currentCenter() {
+    final pos = ref.read(userLocationStreamProvider).value;
+    if (pos == null) return null;
+    return GeoCoordinates(pos.latitude, pos.longitude);
+  }
+
+  // ── Event handlers ─────────────────────────────────────────────
+
+  void _onOriginChanged(String value) {
+    ref.read(sheetStateNotifierProvider.notifier).updateOrigin(value);
+    if (value.isEmpty) ref.read(navSearchNotifierProvider.notifier).clearOrigin();
+    ref.read(navSearchNotifierProvider.notifier).search(value, _currentCenter());
+  }
+
+  void _onDestChanged(String value) {
+    ref.read(sheetStateNotifierProvider.notifier).updateDest(value);
+    if (value.isEmpty) ref.read(navSearchNotifierProvider.notifier).clearDest();
+    ref.read(navSearchNotifierProvider.notifier).search(value, _currentCenter());
+  }
+
+  void _onClearOrigin() {
+    _originCtrl.clear();
+    _onOriginChanged('');
+    _originFocus.requestFocus();
+  }
+
+  void _onClearDest() {
+    _destCtrl.clear();
+    _onDestChanged('');
+    _destFocus.requestFocus();
+  }
+
+  void _onSwap() {
+    // Animate the swap icon: alternate between forward and reverse.
+    if (_swapAnim.status == AnimationStatus.completed) {
+      _swapAnim.reverse();
+    } else {
+      _swapAnim.forward();
+    }
+
+    ref.read(navSearchNotifierProvider.notifier).swap();
+
+    // Sync text controllers to the just-swapped state.
+    final search = ref.read(navSearchNotifierProvider);
+    final newOriginText = search.selectedOrigin?.title ?? '';
+    final newDestText   = search.selectedDest?.title ?? '';
+    if (_originCtrl.text != newOriginText) _originCtrl.text = newOriginText;
+    if (_destCtrl.text   != newDestText)   _destCtrl.text   = newDestText;
+
+    ref.read(sheetStateNotifierProvider.notifier).updateOrigin(newOriginText);
+    ref.read(sheetStateNotifierProvider.notifier).updateDest(newDestText);
+  }
+
+  void _onSelectSuggestion(Suggestion s) {
+    FocusScope.of(context).unfocus();
+    final field = ref.read(navSearchNotifierProvider).activeField;
+
+    if (field == SearchField.origin) {
+      _originCtrl.text = s.title;
+      ref.read(sheetStateNotifierProvider.notifier).updateOrigin(s.title);
+      ref.read(navSearchNotifierProvider.notifier).selectOrigin(s);
+    } else {
+      _destCtrl.text = s.title;
+      ref.read(sheetStateNotifierProvider.notifier).updateDest(s.title);
+      ref.read(navSearchNotifierProvider.notifier).selectDest(s);
+    }
+  }
+
+  void _onLetsGo() {
+    ref.read(navSearchNotifierProvider.notifier).lockForRouting();
+    // Route calculation is wired up in the Routing + trip overview task.
+    // For now the lock is released after one animation frame so the UI
+    // does not get stuck if no routing task follows yet.
+    Future.microtask(() {
+      if (mounted) ref.read(navSearchNotifierProvider.notifier).unlockRouting();
+    });
+  }
+
+  // ── Build ──────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    // Sync controllers when external state changes (e.g. swap via provider).
+    ref.listen(navSearchNotifierProvider, (prev, next) {
+      if (prev?.selectedOrigin != next.selectedOrigin) {
+        final t = next.selectedOrigin?.title ?? '';
+        if (_originCtrl.text != t) _originCtrl.text = t;
+      }
+      if (prev?.selectedDest != next.selectedDest) {
+        final t = next.selectedDest?.title ?? '';
+        if (_destCtrl.text != t) _destCtrl.text = t;
+      }
+    });
+
+    final search = ref.watch(navSearchNotifierProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Input card ──────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            ThemeSpacing.sp4, ThemeSpacing.sp2,
+            ThemeSpacing.sp4, ThemeSpacing.sp0,
+          ),
+          child: _InputCard(
+            originCtrl:    _originCtrl,
+            destCtrl:      _destCtrl,
+            originFocus:   _originFocus,
+            destFocus:     _destFocus,
+            swapAnim:      _swapAnim,
+            onOriginChanged: _onOriginChanged,
+            onDestChanged:   _onDestChanged,
+            onClearOrigin:   _onClearOrigin,
+            onClearDest:     _onClearDest,
+            onSwap:          _onSwap,
+          ),
+        ),
+
+        // ── Let's go ────────────────────────────────────────────
+        AnimatedSize(
+          duration: ThemeMotion.normal,
+          curve: ThemeMotion.smooth,
+          child: search.canRoute
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    ThemeSpacing.sp4, ThemeSpacing.sp3,
+                    ThemeSpacing.sp4, ThemeSpacing.sp0,
+                  ),
+                  child: FilledButton(
+                    onPressed: search.isRouting ? null : _onLetsGo,
+                    child: search.isRouting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(NavStrings.letsgoCta),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+
+        // ── Suggestions / states ────────────────────────────────
+        const SizedBox(height: ThemeSpacing.sp3),
+        if (search.isLoading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: ThemeSpacing.sp4),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: ThemeColors.accent,
+                ),
+              ),
+            ),
+          )
+        else if (search.error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: ThemeSpacing.sp4,
+              vertical: ThemeSpacing.sp2,
+            ),
+            child: Text(
+              search.error!,
+              style: ThemeText.subheadline,
+            ),
+          )
+        else if (search.suggestions.isNotEmpty)
+          _SuggestionList(
+            suggestions: search.suggestions,
+            onSelect:    _onSelectSuggestion,
+          )
+        else if (!search.canRoute)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(
+              ThemeSpacing.sp4, ThemeSpacing.sp2,
+              ThemeSpacing.sp4, ThemeSpacing.sp2,
+            ),
+            child: Text(
+              NavStrings.searchHint,
+              style: ThemeText.subheadline,
+            ),
+          ),
+
+        const SizedBox(height: ThemeSpacing.sp16),
+      ],
+    );
+  }
+}
+
+// ── Input card ─────────────────────────────────────────────────────────────
+// Two stacked input rows divided by a hairline + floating Swap button.
+
+class _InputCard extends StatelessWidget {
+  final TextEditingController originCtrl;
+  final TextEditingController destCtrl;
+  final FocusNode originFocus;
+  final FocusNode destFocus;
+  final AnimationController swapAnim;
+  final ValueChanged<String> onOriginChanged;
+  final ValueChanged<String> onDestChanged;
+  final VoidCallback onClearOrigin;
+  final VoidCallback onClearDest;
+  final VoidCallback onSwap;
+
+  const _InputCard({
+    required this.originCtrl,
+    required this.destCtrl,
+    required this.originFocus,
+    required this.destFocus,
+    required this.swapAnim,
+    required this.onOriginChanged,
+    required this.onDestChanged,
+    required this.onClearOrigin,
+    required this.onClearDest,
+    required this.onSwap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: ThemeColors.surface,
+        borderRadius: ThemeRadius.brMedium,
+        boxShadow: ThemeShadows.pop,
+        border: Border.all(color: ThemeColors.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Origin
+          _InputRow(
+            controller: originCtrl,
+            focusNode:  originFocus,
+            leadingIcon: Icons.my_location,
+            iconColor:   ThemeColors.accent,
+            hint: NavStrings.myLocationLabel,
+            onChanged: onOriginChanged,
+            onClear:   onClearOrigin,
+          ),
+
+          // Divider + Swap button
+          SizedBox(
+            height: 0,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Divider(height: 0, thickness: 1, color: ThemeColors.border),
+                Positioned(
+                  right: ThemeSpacing.sp4,
+                  top: -18,
+                  child: _SwapButton(anim: swapAnim, onTap: onSwap),
+                ),
+              ],
+            ),
+          ),
+
+          // Destination
+          _InputRow(
+            controller: destCtrl,
+            focusNode:  destFocus,
+            leadingIcon: Icons.location_on_outlined,
+            iconColor:   ThemeColors.textTertiary,
+            hint: NavStrings.goingToHint,
+            onChanged: onDestChanged,
+            onClear:   onClearDest,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InputRow extends StatefulWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final IconData leadingIcon;
+  final Color iconColor;
+  final String hint;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  const _InputRow({
+    required this.controller,
+    required this.focusNode,
+    required this.leadingIcon,
+    required this.iconColor,
+    required this.hint,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  @override
+  State<_InputRow> createState() => _InputRowState();
+}
+
+class _InputRowState extends State<_InputRow> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_rebuild);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_rebuild);
+    super.dispose();
+  }
+
+  void _rebuild() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      child: Row(
+        children: [
+          const SizedBox(width: ThemeSpacing.sp4),
+          Icon(widget.leadingIcon, size: 18, color: widget.iconColor),
+          const SizedBox(width: ThemeSpacing.sp3),
+          Expanded(
+            child: TextField(
+              controller: widget.controller,
+              focusNode:  widget.focusNode,
+              onChanged:  widget.onChanged,
+              style:      ThemeText.bodyMedium,
+              textAlignVertical: TextAlignVertical.center,
+              decoration: InputDecoration(
+                hintText: widget.hint,
+                hintStyle: ThemeText.bodyMedium.copyWith(
+                  color: ThemeColors.textTertiary,
+                ),
+                border:        InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled:        false,
+                isDense:       true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          if (widget.controller.text.isNotEmpty) ...[
+            GestureDetector(
+              onTap: widget.onClear,
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: const BoxDecoration(
+                  color: ThemeColors.surfaceContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 14, color: ThemeColors.textSecondary),
+              ),
+            ),
+            const SizedBox(width: ThemeSpacing.sp3),
+          ] else
+            const SizedBox(width: ThemeSpacing.sp4),
+        ],
+      ),
+    );
+  }
+}
+
+class _SwapButton extends StatelessWidget {
+  final AnimationController anim;
+  final VoidCallback onTap;
+
+  const _SwapButton({required this.anim, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: ThemeColors.surface,
+          shape: BoxShape.circle,
+          border: Border.all(color: ThemeColors.border),
+          boxShadow: ThemeShadows.pop,
+        ),
+        child: Center(
+          child: AnimatedBuilder(
+            animation: anim,
+            builder: (_, __) => Transform.rotate(
+              angle: anim.value * pi,
+              child: const Icon(
+                Icons.swap_vert,
+                size: 18,
+                color: ThemeColors.accent,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Suggestion list ────────────────────────────────────────────────────────
+
+class _SuggestionList extends StatelessWidget {
+  final List<Suggestion> suggestions;
+  final void Function(Suggestion) onSelect;
+
+  const _SuggestionList({required this.suggestions, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (int i = 0; i < suggestions.length; i++) ...[
+          SuggestionRow(
+            suggestion: suggestions[i],
+            onTap: () => onSelect(suggestions[i]),
+          ),
+          if (i < suggestions.length - 1)
+            const Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent:    ThemeSpacing.sp4 + 20 + ThemeSpacing.sp3,
+              color: ThemeColors.border,
+            ),
+        ],
+      ],
+    );
+  }
+}
