@@ -5,11 +5,11 @@
       {
         "scope": "project",
         "projectPath": "/home/zaid/Projects/PeoplePerHour/mobileapp-ukcheckpoints",
-        "installPath": "/home/zaid/.claude/plugins/cache/claude-plugins-official/expo/1.0.0",
-        "version": "1.0.0",
+        "installPath": "/home/zaid/.claude/plugins/cache/claude-plugins-official/expo/1.3.1",
+        "version": "1.3.1",
         "installedAt": "2026-06-07T06:29:11.035Z",
-        "lastUpdated": "2026-06-07T06:42:13.208Z",
-        "gitCommitSha": "145a923cce95c2cef20643302e8811363fa2e51d"
+        "lastUpdated": "2026-06-29T13:41:35.732Z",
+        "gitCommitSha": "ad897fdf0c6593d0cc7523198aa752c6f62adeda"
       }
     ],
     "clangd-lsp@claude-plugins-official": [

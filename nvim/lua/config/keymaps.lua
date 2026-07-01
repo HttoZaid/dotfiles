@@ -24,3 +24,9 @@ if vim.g.neovide then
     vim.keymap.set("n", "<C-->", function() increase_scale(-0.1) end, { desc = "Zoom Out" })
     vim.keymap.set("n", "<C-0>", function() vim.g.neovide_scale_factor = 0.3 end, { desc = "Reset Zoom" })
 end
+
+if vim.g.neovide then
+    vim.keymap.set('n', '<F11>', function()
+        vim.g.neovide_fullscreen = not vim.g.neovide_fullscreen
+    end, { silent = true, desc = "Toggle Neovide fullscreen" })
+end
