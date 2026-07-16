@@ -1,70 +1,107 @@
 return {
-  {
-      "folke/ts-comments.nvim",
-      opts = {
-        langs = {
-          c = {
-            line = "// %s",
-            block = "/* %s */",
-          },
+    {
+        "folke/ts-comments.nvim",
+        opts = {
+            langs = {
+                c = {
+                    line = "// %s",
+                    block = "/* %s */",
+                },
 
-          cpp = {
-            line = "// %s",
-            block = "/* %s */",
-          },
+                cpp = {
+                    line = "// %s",
+                    block = "/* %s */",
+                },
 
-          dts = {
-            line = "// %s",
-            block = "/* %s */",
-          },
+                dts = {
+                    line = "// %s",
+                    block = "/* %s */",
+                },
+            },
         },
-      },
-  },
-  {
-    "pwntester/octo.nvim",
-    opts = {
-      use_local_fs = true,
     },
-  },
-  { "sindrets/diffview.nvim", opts = {}, cmd = { "DiffviewOpen" } },
-  {
-    "nvim-mini/mini.align",
-    opts = {},
-    keys = {
-      { "ga", mode = { "n", "v" } },
-      { "gA", mode = { "n", "v" } },
+    {
+        "danymat/neogen",
+        cmd = "Neogen",
+        config = function()
+            require("neogen").setup({
+                snippet_engine = nil,
+                input_after_comment = true,
+            })
+        end,
+        keys = {
+            {
+                "gcd",
+                function()
+                    require("neogen").generate()
+                end,
+                desc = "Generate Doc Comment",
+            },
+            {
+                "gcd",
+                function()
+                    require("neogen").generate()
+                end,
+                mode = "v",
+                desc = "Generate Doc Comment",
+            },
+        },
     },
-  },
-
-  {
-    "smjonas/inc-rename.nvim",
-    cmd = "IncRename",
-    config = true,
-  },
-
-  {
-    "Wansmer/treesj",
-    keys = {
-      { "J", "<cmd>TSJToggle<cr>", desc = "Join Toggle" },
+    {
+        "pwntester/octo.nvim",
+        opts = {
+            use_local_fs = true,
+        },
     },
-    opts = { use_default_keymaps = false, max_join_length = 150 },
-  },
+    { "sindrets/diffview.nvim", opts = {},                              cmd = { "DiffviewOpen" } },
+    {
+        "nvim-mini/mini.align",
+        opts = {},
+        keys = {
+            { "ga", mode = { "n", "v" } },
+            { "gA", mode = { "n", "v" } },
+        },
+    },
 
-  { "nvim-mini/mini.test", cond = vim.fn.isdirectory("tests") == 1 },
+    {
+        "smjonas/inc-rename.nvim",
+        cmd = "IncRename",
+        config = true,
+    },
 
-  {
-    "folke/lazydev.nvim",
-    opts = function(_, opts)
-      local v = vim.version()
-      opts.debug = true
-      opts.runtime = v and v.prerelease and "~/projects/neovim/runtime" or nil
-      vim.list_extend(opts.library, {
-        -- { path = "wezterm-types", mods = { "wezterm" } },
-        { path = "${3rd}/luassert/library", words = { "assert" } },
-        { path = "${3rd}/busted/library", words = { "describe" } },
-      })
-    end,
-  },
+    {
+        "Wansmer/treesj",
+        keys = {
+            { "J", "<cmd>TSJToggle<cr>", desc = "Join Toggle" },
+        },
+        opts = { use_default_keymaps = false, max_join_length = 150 },
+    },
 
-  { "markdown-preview.nvim", enabled = false },
+    { "nvim-mini/mini.test",    cond = vim.fn.isdirectory("tests") == 1 },
+
+    {
+        "folke/lazydev.nvim",
+        opts = function(_, opts)
+            local v = vim.version()
+            opts.debug = true
+            opts.runtime = v and v.prerelease and "~/projects/neovim/runtime" or nil
+            vim.list_extend(opts.library, {
+                -- { path = "wezterm-types", mods = { "wezterm" } },
+                { path = "${3rd}/luassert/library", words = { "assert" } },
+                { path = "${3rd}/busted/library",   words = { "describe" } },
+            })
+        end,
+    },
+
+    { "markdown-preview.nvim", enabled = false },
+
+    {
+        'nvim-flutter/flutter-tools.nvim',
+        lazy = false,
+        dependencies = {
+            'nvim-lua/plenary.nvim',
+            'stevearc/dressing.nvim', -- optional for vim.ui.select
+        },
+        config = true,
+    }
 }

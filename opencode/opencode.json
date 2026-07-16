@@ -1,23 +1,17 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["CONTRIBUTING.md"],
-  "plugin": ["opencode-gemini-auth@latest"],
-  "provider": {
-    "google": {
-      "options": {
-        "projectId": "notify-478811"
-      }
-    }
-  },
+  "instructions": [".opencode/rules/read_only_rationale.md"],
+  "plugin": ["@dietrichgebert/ponytail"],
   "permission": {
-    "*": "allow",
+    "*": "ask",
     "read": "allow",
     "grep": "allow",
     "glob": "allow",
     "lsp": "allow",
-    "edit": "ask",
+    "edit": "deny",
+    "write": "deny",
     "bash": {
-      "*": "ask",
+      "*": "allow",
       "git status*": "allow",
       "git diff*": "allow",
       "rg *": "allow",
