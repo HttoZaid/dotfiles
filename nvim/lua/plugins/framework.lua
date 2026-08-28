@@ -16,7 +16,7 @@ return {
           auto_open_browser = true,
         },
         lsp = {
-          color = { enabled = true },
+          color = nil,
         },
         decorations = {
           statusline = { app_version = true, device = true },
